@@ -1,0 +1,402 @@
+//@version=5
+//GrimmHA Strategy - Trading Strategy
+strategy("GrimmHA Strategy", "GrimmHA Strategy", overlay=true, max_bars_back=500, 
+         default_qty_type=strategy.percent_of_equity, default_qty_value=100, 
+         initial_capital=10000, commission_type=strategy.commission.cash_per_order, commission_value=0.20)
+
+// ################################################################################################################################################################
+// GrimmHA Strategy - Complete Trading System
+// Heikin Ashi Pattern Recognition with SMMA Trend Analysis and Full Trade Management
+// ################################################################################################################################################################
+
+// Input Parameters
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+// Strategy Settings
+enableLongTrades = input.bool(true, title="Enable Long Trades", group="Strategy Settings")
+enableShortTrades = input.bool(true, title="Enable Short Trades", group="Strategy Settings")
+riskPerTrade = input.float(0.02, title="Risk per Trade (% of equity)", minval=0.001, maxval=0.1, group="Strategy Settings")
+
+// SMMA Settings
+len1 = input.int(21, title="SMMA Length 1", minval=1, group="SMMA Settings")
+len2 = input.int(50, title="SMMA Length 2", minval=1, group="SMMA Settings")
+len3 = input.int(100, title="SMMA Length 3", minval=1, group="SMMA Settings")
+len4 = input.int(200, title="SMMA Length 4", minval=1, group="SMMA Settings")
+show100Line = input.bool(true, title="Show 100 SMMA", group="SMMA Settings")
+
+// Doji Detection Settings
+dojiBodyPercent = input.float(5.0, title="Doji Body Percentage", minval=1.0, maxval=20.0, group="Doji Settings")
+shadowPercent = input.float(5.0, title="Shadow Percentage", minval=1.0, maxval=20.0, group="Doji Settings")
+shadowEqualsPercent = input.float(100.0, title="Shadow Balance Tolerance", minval=50.0, maxval=200.0, group="Doji Settings")
+
+// Risk Management
+riskRewardRatio = input.float(3.0, title="Risk:Reward Ratio", minval=1.0, maxval=10.0, group="Risk Management")
+usdRiskPerTrade = input.int(50, title="Fixed Risk Amount (USD)", minval=1, group="Risk Management")
+enableBreakeven = input.bool(true, title="Enable Breakeven Management", group="Risk Management")
+enableDynamicStops = input.bool(true, title="Enable Dynamic Stop Adjustment", group="Risk Management")
+
+// Additional Pattern Recognition
+enable3LineStrike = input.bool(true, title="Enable 3-Line Strike Patterns", group="Additional Patterns")
+enableEngulfing = input.bool(true, title="Enable Engulfing Patterns", group="Additional Patterns")
+
+// Visual Settings
+hideBackground = input.bool(false, title="Hide Background Colors", group="Visual Settings")
+showSignals = input.bool(true, title="Show Entry Signals", group="Visual Settings")
+showLevels = input.bool(true, title="Show Trade Levels", group="Visual Settings")
+
+// Session Settings
+enableSessionFilter = input.bool(false, title="Enable Session Filter", group="Session Settings")
+sessionStartHour = input.int(8, title="Session Start Hour", minval=0, maxval=23, group="Session Settings")
+sessionStartMinute = input.int(30, title="Session Start Minute", minval=0, maxval=59, group="Session Settings")
+sessionEndHour = input.int(12, title="Session End Hour", minval=0, maxval=23, group="Session Settings")
+sessionEndMinute = input.int(0, title="Session End Minute", minval=0, maxval=59, group="Session Settings")
+sessionTimezone = input.string("America/Chicago", title="Timezone", group="Session Settings",
+                 options=["America/New_York", "America/Chicago", "Europe/London", "Europe/Frankfurt", "Asia/Tokyo", "Asia/Sydney"])
+
+// ################################################################################################################################################################
+// SMMA Calculations
+// ################################################################################################################################################################
+
+smma1 = 0.0
+sma_1 = ta.sma(close, len1)
+smma1 := na(smma1[1]) ? sma_1 : (smma1[1] * (len1 - 1) + close) / len1
+
+smma2 = 0.0
+sma_2 = ta.sma(close, len2)
+smma2 := na(smma2[1]) ? sma_2 : (smma2[1] * (len2 - 1) + close) / len2
+
+smma3 = 0.0
+sma_3 = ta.sma(close, len3)
+smma3 := na(smma3[1]) ? sma_3 : (smma3[1] * (len3 - 1) + close) / len3
+
+smma4 = 0.0
+sma_4 = ta.sma(close, len4)
+smma4 := na(smma4[1]) ? sma_4 : (smma4[1] * (len4 - 1) + close) / len4
+
+// Plot SMAs
+plot(smma1, color=color.white, linewidth=2, title="21 SMMA")
+plot(smma2, color=color.new(#6aff00, 0), linewidth=2, title="50 SMMA")
+plot(show100Line ? smma3 : na, color=color.new(color.yellow, 0), linewidth=2, title="100 SMMA")
+plot(smma4, color=color.new(#ff0500, 0), linewidth=2, title="200 SMMA")
+
+// Trend Fill
+ema2 = ta.ema(close, 2)
+ema2plot = plot(ema2, color=#2ecc71, display=display.none, title="EMA(2)")
+sma4plot = plot(smma4, display=display.none, title="200 SMMA Fill")
+fill(ema2plot, sma4plot, color=ema2 > smma4 ? color.new(color.green, 85) : color.new(color.red, 85), title="Trend Fill")
+
+// ################################################################################################################################################################
+// Doji Pattern Detection
+// ################################################################################################################################################################
+
+// Calculate candle components
+bodyHi = math.max(close, open)
+bodyLo = math.min(close, open)
+body = bodyHi - bodyLo
+bodyAvg = ta.ema(body, 14)
+upShadow = high - bodyHi
+dnShadow = bodyLo - low
+totalRange = high - low
+
+// Doji detection logic
+shadowEquals = upShadow == dnShadow or 
+               (math.abs(upShadow - dnShadow) / dnShadow * 100 < shadowEqualsPercent and
+                math.abs(dnShadow - upShadow) / upShadow * 100 < shadowEqualsPercent)
+
+isDojiBody = totalRange > 0 and body <= totalRange * dojiBodyPercent / 100
+
+// Exclude specific Doji types
+dragonflyDoji = isDojiBody and upShadow <= body
+gravestoneDoji = isDojiBody and dnShadow <= body
+
+// Final Doji determination
+doji = isDojiBody and shadowEquals and not dragonflyDoji and not gravestoneDoji
+
+// ################################################################################################################################################################
+// Trend Analysis
+// ################################################################################################################################################################
+
+// Trend direction based on SMMA hierarchy
+bullishTrend = smma1 > smma2 and smma2 > smma3 and smma3 > smma4
+bearishTrend = smma1 < smma2 and smma2 < smma3 and smma3 < smma4
+
+// Price position relative to key SMMA
+aboveTrend = close > smma2
+belowTrend = close < smma2
+
+// ################################################################################################################################################################
+// Heikin Ashi Signal Detection
+// ################################################################################################################################################################
+
+// Heikin Ashi calculations (using regular candles for signal detection)
+haClose = (open + high + low + close) / 4
+var float haOpen = na
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (nz(haOpen[1]) + nz(haClose[1])) / 2
+haHigh = math.max(high, math.max(haOpen, haClose))
+haLow = math.min(low, math.min(haOpen, haClose))
+
+// HA signal conditions (using regular OHLC for precise entry signals)
+bullHA = low == open and close > open and doji[1]
+bearHA = high == open and close < open and doji[1]
+
+// ################################################################################################################################################################
+// Additional Pattern Recognition
+// ################################################################################################################################################################
+
+// 3-Line Strike Patterns
+bearish3LS = enable3LineStrike and close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
+bullish3LS = enable3LineStrike and close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
+
+// Engulfing Patterns
+bullishEngulfing = enableEngulfing and open <= close[1] and open < open[1] and close > open[1]
+bearishEngulfing = enableEngulfing and open >= close[1] and open > open[1] and close < open[1]
+
+// ################################################################################################################################################################
+// Session Filtering
+// ################################################################################################################################################################
+
+// Session time calculation
+sessionStart = timestamp(sessionTimezone, year, month, dayofmonth, sessionStartHour, sessionStartMinute)
+sessionEnd = timestamp(sessionTimezone, year, month, dayofmonth, sessionEndHour, sessionEndMinute)
+inSession = enableSessionFilter ? (time >= sessionStart and time <= sessionEnd) : true
+
+// ################################################################################################################################################################
+// ATR-Based Risk Management
+// ################################################################################################################################################################
+
+atrLength = 14
+atrValue = ta.atr(atrLength)
+minTradeRisk = 2 * atrValue
+maxTradeRisk = 4 * atrValue
+
+// ################################################################################################################################################################
+// Entry Conditions
+// ################################################################################################################################################################
+
+// Long entry conditions
+longCondition = enableLongTrades and bullishTrend and aboveTrend and bullHA and inSession and strategy.position_size == 0
+
+// Short entry conditions
+shortCondition = enableShortTrades and bearishTrend and belowTrend and bearHA and inSession and strategy.position_size == 0
+
+// ################################################################################################################################################################
+// Trade Management Variables
+// ################################################################################################################################################################
+
+var float entryPrice = na
+var float stopPrice = na
+var float targetPrice = na
+var float breakevenPrice = na
+var bool breakevenActive = false
+
+// ################################################################################################################################################################
+// Position Sizing Function
+// ################################################################################################################################################################
+
+calculatePositionSize(entry, stop, riskAmount) =>
+    stopDistance = math.abs(entry - stop)
+    if stopDistance > 0 and stopDistance >= minTradeRisk and stopDistance <= maxTradeRisk
+        riskAmount / stopDistance
+    else
+        0.0
+
+// ################################################################################################################################################################
+// Long Trade Logic
+// ################################################################################################################################################################
+
+if longCondition
+    // Calculate trade levels
+    entry = close
+    stop = math.min(low[1], low[2], low[3])
+    stopDistance = entry - stop
+    target = entry + (stopDistance * riskRewardRatio)
+    breakeven = entry + stopDistance
+    
+    // Calculate position size
+    accountEquity = strategy.equity
+    riskAmount = accountEquity * riskPerTrade
+    positionSize = calculatePositionSize(entry, stop, riskAmount)
+    
+    // Enter trade if position size is valid
+    if positionSize > 0
+        strategy.entry("Long", strategy.long, qty=positionSize)
+        entryPrice := entry
+        stopPrice := stop
+        targetPrice := target
+        breakevenPrice := breakeven
+        breakevenActive := false
+
+// ################################################################################################################################################################
+// Short Trade Logic
+// ################################################################################################################################################################
+
+if shortCondition
+    // Calculate trade levels
+    entry = close
+    stop = math.max(high[1], high[2], high[3])
+    stopDistance = stop - entry
+    target = entry - (stopDistance * riskRewardRatio)
+    breakeven = entry - stopDistance
+    
+    // Calculate position size
+    accountEquity = strategy.equity
+    riskAmount = accountEquity * riskPerTrade
+    positionSize = calculatePositionSize(entry, stop, riskAmount)
+    
+    // Enter trade if position size is valid
+    if positionSize > 0
+        strategy.entry("Short", strategy.short, qty=positionSize)
+        entryPrice := entry
+        stopPrice := stop
+        targetPrice := target
+        breakevenPrice := breakeven
+        breakevenActive := false
+
+// ################################################################################################################################################################
+// Dynamic Stop Management
+// ################################################################################################################################################################
+
+if strategy.position_size > 0 and enableDynamicStops
+    currentStop = stopPrice
+    newStop = smma2  // Use 50 SMMA as trailing stop
+    
+    // Only move stop in favorable direction
+    if newStop > currentStop and newStop < entryPrice
+        stopPrice := newStop
+
+if strategy.position_size < 0 and enableDynamicStops
+    currentStop = stopPrice
+    newStop = smma2  // Use 50 SMMA as trailing stop
+    
+    // Only move stop in favorable direction
+    if newStop < currentStop and newStop > entryPrice
+        stopPrice := newStop
+
+// ################################################################################################################################################################
+// Breakeven Management
+// ################################################################################################################################################################
+
+if strategy.position_size > 0 and enableBreakeven and not breakevenActive
+    if high >= breakevenPrice and high < targetPrice
+        breakevenActive := true
+
+if strategy.position_size < 0 and enableBreakeven and not breakevenActive
+    if low <= breakevenPrice and low > targetPrice
+        breakevenActive := true
+
+// ################################################################################################################################################################
+// Exit Logic
+// ################################################################################################################################################################
+
+// Stop Loss
+if strategy.position_size > 0 and not breakevenActive
+    strategy.exit("Long Exit", "Long", stop=stopPrice, limit=targetPrice)
+else if strategy.position_size > 0 and breakevenActive
+    strategy.exit("Long BE", "Long", stop=entryPrice, limit=targetPrice)
+
+if strategy.position_size < 0 and not breakevenActive
+    strategy.exit("Short Exit", "Short", stop=stopPrice, limit=targetPrice)
+else if strategy.position_size < 0 and breakevenActive
+    strategy.exit("Short BE", "Short", stop=entryPrice, limit=targetPrice)
+
+// ################################################################################################################################################################
+// Visualization
+// ################################################################################################################################################################
+
+// Background colors
+bgcolor(bullishTrend and not hideBackground ? color.new(color.green, 90) : na, title="Bullish Trend")
+bgcolor(bearishTrend and not hideBackground ? color.new(color.red, 90) : na, title="Bearish Trend")
+
+// Doji markers
+plotchar(doji, char="D", location=location.abovebar, color=color.gray, size=size.small, title="Doji Pattern")
+
+// HA signal markers
+plotshape(bullHA and showSignals, title="Bullish HA", style=shape.triangleup, location=location.belowbar, 
+          color=color.lime, text="HA Bull", size=size.small)
+plotshape(bearHA and showSignals, title="Bearish HA", style=shape.triangledown, location=location.abovebar, 
+          color=color.red, text="HA Bear", size=size.small)
+
+// Entry signals
+plotshape(longCondition and showSignals, title="Long Entry", style=shape.labelup, location=location.belowbar, 
+          color=color.green, text="LONG", textcolor=color.white, size=size.normal)
+plotshape(shortCondition and showSignals, title="Short Entry", style=shape.labeldown, location=location.abovebar, 
+          color=color.red, text="SHORT", textcolor=color.white, size=size.normal)
+
+// Additional patterns
+plotshape(bullish3LS and showSignals, title="Bullish 3LS", style=shape.triangleup, location=location.belowbar, 
+          color=color.blue, size=size.tiny, text="3LS")
+plotshape(bearish3LS and showSignals, title="Bearish 3LS", style=shape.triangledown, location=location.abovebar, 
+          color=color.purple, size=size.tiny, text="3LS")
+
+plotshape(bullishEngulfing and showSignals, title="Bullish Engulfing", style=shape.circle, location=location.belowbar, 
+          color=color.aqua, size=size.tiny, text="E")
+plotshape(bearishEngulfing and showSignals, title="Bearish Engulfing", style=shape.circle, location=location.abovebar, 
+          color=color.orange, size=size.tiny, text="E")
+
+// Trade levels for active positions
+currentStopLevel = strategy.position_size != 0 ? stopPrice : na
+currentEntryLevel = strategy.position_size != 0 ? strategy.position_avg_price : na
+currentTargetLevel = strategy.position_size != 0 ? targetPrice : na
+currentBreakevenLevel = strategy.position_size != 0 ? breakevenPrice : na
+
+plot(currentStopLevel and showLevels ? currentStopLevel : na, color=color.red, linewidth=2, style=plot.style_line, title="Stop Level")
+plot(currentEntryLevel and showLevels ? currentEntryLevel : na, color=color.white, linewidth=2, style=plot.style_line, title="Entry Level")
+plot(currentTargetLevel and showLevels ? currentTargetLevel : na, color=color.green, linewidth=2, style=plot.style_line, title="Target Level")
+plot(currentBreakevenLevel and showLevels ? currentBreakevenLevel : na, color=color.blue, linewidth=1, style=plot.style_line, title="Breakeven Level")
+
+// ################################################################################################################################################################
+// Alerts
+// ################################################################################################################################################################
+
+alertcondition(longCondition, title="Long Entry Signal", message="{{ticker}} - GrimmHA Long Entry at {{close}}")
+alertcondition(shortCondition, title="Short Entry Signal", message="{{ticker}} - GrimmHA Short Entry at {{close}}")
+alertcondition(doji, title="Doji Pattern", message="{{ticker}} - Doji pattern detected")
+alertcondition(bullHA, title="Bullish HA Signal", message="{{ticker}} - Bullish Heikin Ashi signal")
+alertcondition(bearHA, title="Bearish HA Signal", message="{{ticker}} - Bearish Heikin Ashi signal")
+alertcondition(bullishTrend, title="Bullish Trend", message="{{ticker}} - Bullish trend activated")
+alertcondition(bearishTrend, title="Bearish Trend", message="{{ticker}} - Bearish trend activated")
+
+// ################################################################################################################################################################
+// Performance Information
+// ################################################################################################################################################################
+
+// Calculate performance metrics
+totalTrades = strategy.closedtrades
+winRate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100 : 0
+netProfit = strategy.netprofit
+maxDrawdown = strategy.max_drawdown
+profitFactor = strategy.grossprofit > 0 ? strategy.grossprofit / strategy.grossloss : 0
+
+// Display performance table
+var table perfTable = table.new(position.top_right, 2, 7, bgcolor=color.white, border_width=1)
+
+if barstate.islast
+    // Performance metrics
+    table.cell(perfTable, 0, 0, "Total Trades:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 0, str.tostring(totalTrades), text_color=color.black, text_size=size.small)
+    
+    table.cell(perfTable, 0, 1, "Win Rate:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 1, str.tostring(winRate, "#.##") + "%", text_color=color.black, text_size=size.small)
+    
+    table.cell(perfTable, 0, 2, "Net Profit:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 2, "$" + str.tostring(netProfit, "#.##"), text_color=netProfit > 0 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(perfTable, 0, 3, "Max DD:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 3, str.tostring(maxDrawdown, "#.##") + "%", text_color=color.red, text_size=size.small)
+    
+    table.cell(perfTable, 0, 4, "Profit Factor:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 4, str.tostring(profitFactor, "#.##"), text_color=color.blue, text_size=size.small)
+    
+    // Current position info
+    positionText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    positionColor = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    
+    table.cell(perfTable, 0, 5, "Position:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 5, positionText, text_color=positionColor, text_size=size.small)
+    
+    // Trend status
+    trendText = bullishTrend ? "BULLISH" : bearishTrend ? "BEARISH" : "NEUTRAL"
+    trendColor = bullishTrend ? color.green : bearishTrend ? color.red : color.gray
+    
+    table.cell(perfTable, 0, 6, "Trend:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 6, trendText, text_color=trendColor, text_size=size.small)

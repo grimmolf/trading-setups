@@ -1,0 +1,235 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// SCDTM (Stone Cold DA MAN) Indicator - Clean Implementation
+// Original concept: Brian Beamish (TRI)
+// Pine Script implementation: Daveatt & JoshuaMcGowan
+// Updated and optimized version
+
+//@version=5
+indicator(title="SCDTM Indicator", shorttitle="SCDTM", overlay=true, precision=7)
+
+// Input Parameters
+src = input.source(close, title="Strategy Source")
+n = input.int(title="Fractal Periods", defval=2, minval=2)
+fractalBars = input.string(title="Fractal Type", defval="5", options=["3", "5"])
+colorcandles = input.bool(title="Colored Candles", defval=false)
+
+// Bollinger Band %B Inputs
+length_bbr = input.int(20, minval=1, title="BB% Length")
+mult_bbr = input.float(2.0, minval=0.001, maxval=50, title="BB% Std Dev")
+upper_thresh = input.float(1.00, minval=0.001, maxval=2, title="BB% Upper Threshold")
+lower_thresh = input.float(0.00, minval=0.001, maxval=2, title="BB% Lower Threshold")
+
+// Stochastic RSI Inputs
+smoothK = input.int(3, minval=1, title="Stoch RSI %K Smooth")
+smoothD = input.int(3, minval=1, title="Stoch RSI %D Smooth")
+lengthRSI = input.int(14, minval=1, title="RSI Length")
+lengthStoch = input.int(14, minval=1, title="Stochastic Length")
+
+//==============================================================================
+// CHECKPOINT 1: Multi-Timeframe EMA Alignment
+//==============================================================================
+
+// EMA Calculations
+ema9 = ta.ema(src, 9)
+ema18 = ta.ema(src, 18)
+
+// Multi-timeframe EMA analysis
+ema9_D = request.security(syminfo.tickerid, 'D', ema9, lookahead=barmerge.lookahead_on)
+ema18_D = request.security(syminfo.tickerid, 'D', ema18, lookahead=barmerge.lookahead_on)
+
+ema9_H4 = request.security(syminfo.tickerid, '240', ema9, lookahead=barmerge.lookahead_on)
+ema18_H4 = request.security(syminfo.tickerid, '240', ema18, lookahead=barmerge.lookahead_on)
+
+ema9_H1 = request.security(syminfo.tickerid, '60', ema9, lookahead=barmerge.lookahead_on)
+ema18_H1 = request.security(syminfo.tickerid, '60', ema18, lookahead=barmerge.lookahead_on)
+
+// Individual timeframe bias
+bull_ema_daily = ema9_D >= ema18_D ? 1 : 0
+bear_ema_daily = ema9_D < ema18_D ? 1 : 0
+
+bull_ema_H4 = ema9_H4 >= ema18_H4 ? 1 : 0
+bear_ema_H4 = ema9_H4 < ema18_H4 ? 1 : 0
+
+bull_ema_H1 = ema9_H1 >= ema18_H1 ? 1 : 0
+bear_ema_H1 = ema9_H1 < ema18_H1 ? 1 : 0
+
+// Consolidated EMA alignment
+bull_ema_index = bull_ema_daily + bull_ema_H4 + bull_ema_H1
+bear_ema_index = bear_ema_daily + bear_ema_H4 + bear_ema_H1
+
+// Checkpoint 1 validation
+cp1 = (bull_ema_index == 3) or (bear_ema_index == 3)
+
+//==============================================================================
+// CHECKPOINT 2: Bollinger Band %B and Stochastic RSI
+//==============================================================================
+
+// Bollinger Band %B calculation
+basis_bbr = ta.sma(src, length_bbr)
+dev_bbr = mult_bbr * ta.stdev(src, length_bbr)
+upper_bbr = basis_bbr + dev_bbr
+lower_bbr = basis_bbr - dev_bbr
+bbr = (src - lower_bbr) / (upper_bbr - lower_bbr)
+
+// %B signal tracking with persistence
+var long_bbr = 0
+var short_bbr = 0
+
+if bbr <= lower_thresh
+    long_bbr := 1
+if bbr >= 0.55 and long_bbr == 1
+    long_bbr := 0
+
+if bbr >= upper_thresh
+    short_bbr := 1
+if bbr <= 0.45 and short_bbr == 1
+    short_bbr := 0
+
+// Stochastic RSI calculation
+rsi1 = ta.rsi(src, lengthRSI)
+k = ta.sma(ta.stoch(rsi1, rsi1, rsi1, lengthStoch), smoothK)
+d = ta.sma(k, smoothD)
+
+// Stochastic RSI signals
+var long_rsi = 0
+var short_rsi = 0
+
+if k >= d
+    long_rsi := 1
+else
+    long_rsi := 0
+
+if d >= k
+    short_rsi := 1
+else
+    short_rsi := 0
+
+// Checkpoint 2 validation
+cp2 = ((bear_ema_index == 3) and (short_bbr == 1) and (short_rsi == 1)) or 
+      ((bull_ema_index == 3) and (long_bbr == 1) and (long_rsi == 1))
+
+//==============================================================================
+// CHECKPOINT 3: Fractal Pattern Recognition
+//==============================================================================
+
+// Fractal detection logic
+dnFractal = fractalBars == "5" ? 
+    (high[n-2] < high[n] and high[n-1] < high[n] and high[n+1] < high[n] and high[n+2] < high[n]) :
+    fractalBars == "3" ? 
+    (high[n-1] < high[n] and high[n+1] < high[n]) : false
+
+upFractal = fractalBars == "5" ? 
+    (low[n-2] > low[n] and low[n-1] > low[n] and low[n+1] > low[n] and low[n+2] > low[n]) :
+    fractalBars == "3" ? 
+    (low[n-1] > low[n] and low[n+1] > low[n]) : false
+
+// Valid fractal conditions with trend alignment
+bull_fractal_valid = upFractal and (bull_ema_index == 3)
+bear_fractal_valid = dnFractal and (bear_ema_index == 3)
+
+// Checkpoint 3 validation
+cp3 = cp2 and (bull_fractal_valid or bear_fractal_valid)
+
+//==============================================================================
+// SIGNAL GENERATION
+//==============================================================================
+
+// Primary signals
+bullSignal = cp3 and bull_fractal_valid
+bearSignal = cp3 and bear_fractal_valid
+
+// Signal quality assessment
+signal_strength = cp1 ? (cp2 ? (cp3 ? 3 : 2) : 1) : 0
+
+//==============================================================================
+// VISUAL COMPONENTS
+//==============================================================================
+
+// Fractal plots
+plotshape(bear_ema_index == 3 and cp2 and dnFractal, "Down Fractal", 
+          style=shape.triangledown, location=location.abovebar, 
+          size=size.tiny, offset=-2, color=color.red)
+
+plotshape(bull_ema_index == 3 and cp2 and upFractal, "Up Fractal", 
+          style=shape.triangleup, location=location.belowbar, 
+          size=size.tiny, offset=-2, color=color.green)
+
+// Signal plots
+plotshape(bullSignal, title="SCDTM Long", color=color.new(color.green, 0), 
+          textcolor=color.white, style=shape.labelup, 
+          location=location.belowbar, size=size.normal, text="LONG")
+
+plotshape(bearSignal, title="SCDTM Short", color=color.new(color.red, 0), 
+          textcolor=color.white, style=shape.labeldown, 
+          location=location.abovebar, size=size.normal, text="SHORT")
+
+// Trend alignment display
+bgcolor(bull_ema_index == 3 ? color.new(color.green, 90) : 
+        bear_ema_index == 3 ? color.new(color.red, 90) : na)
+
+// Candle coloring
+candlecolor = fractalBars == "3" ? color.new(#FF9F20, 0) : 
+              fractalBars == "5" ? color.new(#500050, 0) : color.black
+barcolor(colorcandles ? candlecolor : na)
+
+//==============================================================================
+// INFORMATION PANEL
+//==============================================================================
+
+// Create info table
+var table infoTable = table.new(position.top_right, 2, 8, bgcolor=color.white, border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Component", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 0, "Status", text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 1, "EMA Alignment", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 1, cp1 ? "✓" : "✗", 
+              text_color=cp1 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 2, "%B + Stoch RSI", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 2, cp2 ? "✓" : "✗", 
+              text_color=cp2 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 3, "Fractal Pattern", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 3, cp3 ? "✓" : "✗", 
+              text_color=cp3 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 4, "Bull Index", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(bull_ema_index) + "/3", 
+              text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 5, "Bear Index", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 5, str.tostring(bear_ema_index) + "/3", 
+              text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 6, "Signal Strength", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 6, str.tostring(signal_strength) + "/3", 
+              text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 7, "%B Value", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 7, str.tostring(math.round(bbr, 3)), 
+              text_color=color.black, text_size=size.small)
+
+//==============================================================================
+// ALERTS
+//==============================================================================
+
+alertcondition(bullSignal, title="SCDTM Long Signal", 
+               message="SCDTM Long signal generated on {{ticker}} at {{close}}")
+
+alertcondition(bearSignal, title="SCDTM Short Signal", 
+               message="SCDTM Short signal generated on {{ticker}} at {{close}}")
+
+alertcondition(bullSignal or bearSignal, title="SCDTM Any Signal", 
+               message="SCDTM signal generated on {{ticker}}: {{bullSignal ? 'LONG' : 'SHORT'}} at {{close}}")
+
+//==============================================================================
+// OUTPUT VALUES (for strategy use)
+//==============================================================================
+
+plot(bullSignal ? 1 : 0, title="Bull Signal", display=display.data_window)
+plot(bearSignal ? 1 : 0, title="Bear Signal", display=display.data_window)
+plot(bull_ema_index, title="Bull EMA Index", display=display.data_window)
+plot(bear_ema_index, title="Bear EMA Index", display=display.data_window)
+plot(signal_strength, title="Signal Strength", display=display.data_window)

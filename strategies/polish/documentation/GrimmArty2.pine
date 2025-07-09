@@ -1,0 +1,544 @@
+//@version=5
+strategy(title="GrimmArty-strat", shorttitle="GrimmArty-strat", overlay=true)
+
+// ### Four Smoothed Moving Averages
+
+len1 = 21
+//input(21, minval=1, title="Length 1", group = "Smoothed MA Inputs")
+src1 = close
+//input(close, title="Source 1", group = "Smoothed MA Inputs")
+smma1 = 0.0
+sma_1 = ta.sma(src1, len1)
+smma1 := na(smma1[1]) ? sma_1 : (smma1[1] * (len1 - 1) + src1) / len1
+plot(smma1, color=color.green, linewidth=2, title="21 SMMA")
+
+len2 = 50
+//input(50, minval=1, title="Length 2", group = "Smoothed MA Inputs")
+src2 = close
+//input(close, title="Source 2", group = "Smoothed MA Inputs")
+smma2 = 0.0
+sma_2 = ta.sma(src2, len2)
+smma2 := na(smma2[1]) ? sma_2 : (smma2[1] * (len2 - 1) + src2) / len2
+plot(smma2, color=color.yellow, linewidth=2, title="50 SMMA")
+
+h100 = input.bool(title="Show 100 Line", defval=false, group = "Smoothed MA Inputs")
+len3 = 100
+//input(100, minval=1, title="Length 3", group = "Smoothed MA Inputs")
+src3 = close
+//input(close, title="Source 3", group = "Smoothed MA Inputs")
+smma3 = 0.0
+sma_3 = ta.sma(src3, len3)
+smma3 := na(smma3[1]) ? sma_3 : (smma3[1] * (len3 - 1) + src3) / len3
+sma3plot = plot(h100 ? smma3 : na, color=color.white, linewidth=2, title="100 SMMA")
+
+len4 = 200
+//input(200, minval=1, title="Length 4", group = "Smoothed MA Inputs")
+src4 = close
+//input(close, title="Source 4", group = "Smoothed MA Inputs")
+smma4 = 0.0
+sma_4 = ta.sma(src4, len4)
+smma4 := na(smma4[1]) ? sma_4 : (smma4[1] * (len4 - 1) + src4) / len4
+sma4plot = plot(smma4, color=color.new(#ff0500,0), linewidth=2, title="200 SMMA")
+
+// Trend Fill
+
+trendFill = input.bool(title="Show Trend Fill", defval=true, group = "Smoothed MA Inputs") 
+ema2 = ta.ema(close, 2)
+ema2plot = plot(ema2, color=#2ecc71, transp=100, style=plot.style_line, linewidth=1, title="EMA(2)", editable = false)
+
+fill(ema2plot, sma4plot, color=ema2 > smma4 and trendFill ? color.green : ema2 < smma4 and trendFill ? color.red : na, transp=85, title = "Trend Fill")
+
+// End ###
+
+// ### 3 Line Strike
+
+bearS = input.bool(title="Show Bearish 3 Line Strike", defval=true, group = "3 Line Strike")
+bullS = input.bool(title="Show Bullish 3 Line Strike", defval=true, group = "3 Line Strike")
+
+bearSig = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
+bullSig = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
+
+plotshape(bullS ? bullSig : na, style=shape.triangleup, color=color.green, location=location.belowbar, size = size.small,  text="3s-Bull", title="3 Line Strike Up")
+plotshape(bearS ? bearSig : na, style=shape.triangledown, color=color.red, location=location.abovebar, size = size.small,  text="3s-Bear", title="3 Line Strike Down")
+
+// End ###
+
+//### Engulfing Candles
+
+bearE = input.bool(title="Show Bearish Big A$$ Candles", defval=true, group = "Big A$$ Candles")
+bullE = input.bool(title="Show Bullish Big A$$ Candles", defval=true, group = "Big A$$ Candles")
+
+openBarPrevious = open[1]
+closeBarPrevious = close[1]
+openBarCurrent = open
+closeBarCurrent = close
+
+//If current bar open is less than equal to the previous bar close AND current bar open is less than previous bar open AND current bar close is greater than previous bar open THEN True
+bullishEngulfing = openBarCurrent <= closeBarPrevious and openBarCurrent < openBarPrevious and 
+   closeBarCurrent > openBarPrevious
+//If current bar open is greater than equal to previous bar close AND current bar open is greater than previous bar open AND current bar close is less than previous bar open THEN True
+bearishEngulfing = openBarCurrent >= closeBarPrevious and openBarCurrent > openBarPrevious and 
+   closeBarCurrent < openBarPrevious
+
+//bullishEngulfing/bearishEngulfing return a value of 1 or 0; if 1 then plot on chart, if 0 then don't plot
+plotshape(bullE ? bullishEngulfing : na, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.tiny, title="Big Ass Candle Up" )
+plotshape(bearE ? bearishEngulfing : na, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny, title="Big Ass Candle Down")
+
+alertcondition(bullishEngulfing, title="Bullish Engulfing", message="[CurrencyPair] [TimeFrame], Bullish candle engulfing previous candle")
+alertcondition(bearishEngulfing, title="Bearish Engulfing", message="[CurrencyPair] [TimeFrame], Bearish candle engulfing previous candle")
+
+// End ###
+
+longmarket = input.bool(title="Long Trades", defval=true, group = "Trade Types")
+shortmarket = input.bool(title="Short Trades", defval=true, group = "Trade Types")
+
+// ### Trading Session
+
+ts = input.bool(title="Show Trade Session", defval=true, group = "Trade Session")
+
+tz = input.string(title="Timezone", defval="America/Chicago", options=["Asia/Sydney", "Asia/Tokyo", "Europe/Frankfurt", "Europe/London", "UTC", "America/New_York", "America/Chicago"], group = "Trade Session")
+label = input.string(title="Label", defval="CME Open", tooltip="For easy identification", group = "Trade Session")
+
+startHour = input.int(title="analysis Start hour", defval=7, minval=0, maxval=23, group = "Trade Session")
+startMinute = input.int(title="analysis Start minute", defval=00, minval=0, maxval=59, group = "Trade Session")
+
+startHour2 = input.int(title="Session Start hour", defval=8, minval=0, maxval=23, group = "Trade Session")
+startMinute2 = input.int(title="Session Start minute", defval=30, minval=0, maxval=59, group = "Trade Session")
+endHour2 = input.int(title="Session End hour", defval=12, minval=0, maxval=23, group = "Trade Session")
+endMinute2 = input.int(title="Session End minute", defval=0, minval=0, maxval=59, group = "Trade Session")
+
+rangeColor = input.color(title="Color", defval=#1976d21f, group = "Trade Session")
+showMon = input.bool(title="Monday", defval=true, group = "Trade Session")
+showTue = input.bool(title="Tuesday", defval=true, group = "Trade Session")
+showWed = input.bool(title="Wednesday", defval=true, group = "Trade Session")
+showThu = input.bool(title="Thursday", defval=true, group = "Trade Session")
+showFri = input.bool(title="Friday", defval=true, group = "Trade Session")
+showSat = input.bool(title="Saturday", defval=false, group = "Trade Session")
+showSun = input.bool(title="Sunday", defval=false, group = "Trade Session")
+
+tzYear = year(time, tz)
+tzMonth = month(time, tz)
+tzDay = dayofmonth(time, tz)
+tzDayOfWeek = dayofweek(time, tz)
+startTime = timestamp(tz, tzYear, tzMonth, tzDay, startHour, startMinute)
+endTime = timestamp(tz, tzYear, tzMonth, tzDay, endHour2, endMinute2)
+
+active = if startTime <= time and time <= endTime and ts
+    if tzDayOfWeek == dayofweek.monday and showMon
+        true
+    else if tzDayOfWeek == dayofweek.tuesday and showTue
+        true
+    else if tzDayOfWeek == dayofweek.wednesday and showWed
+        true
+    else if tzDayOfWeek == dayofweek.thursday and showThu
+        true
+    else if tzDayOfWeek == dayofweek.friday and showFri
+        true
+    else if tzDayOfWeek == dayofweek.saturday and showSat
+        true
+    else if tzDayOfWeek == dayofweek.sunday and showSun
+        true
+    else
+        false
+else
+    false
+
+bgcolor(color=active ? rangeColor : na, title = "Session Background")
+
+
+startTime2 = timestamp(tz, tzYear, tzMonth, tzDay, startHour2, startMinute2)
+endTime2 = timestamp(tz, tzYear, tzMonth, tzDay, endHour2, endMinute2)
+
+active2 = if startTime2 <= time and time <= endTime2 and ts
+    if tzDayOfWeek == dayofweek.monday and showMon
+        true
+    else if tzDayOfWeek == dayofweek.tuesday and showTue
+        true
+    else if tzDayOfWeek == dayofweek.wednesday and showWed
+        true
+    else if tzDayOfWeek == dayofweek.thursday and showThu
+        true
+    else if tzDayOfWeek == dayofweek.friday and showFri
+        true
+    else if tzDayOfWeek == dayofweek.saturday and showSat
+        true
+    else if tzDayOfWeek == dayofweek.sunday and showSun
+        true
+    else
+        false
+else
+    false
+    
+bgcolor(color=active2 ? rangeColor : na, title = "Session Background")
+
+// Variables for Trade Module
+USDRiskPerTrade = input.int(defval=1, title="Fixed risk amount per trade in USD") // Changing to $1 from $50
+Leverage = input(1)
+Min_Trade_Risk = 2*ta.atr(14)
+Max_Trade_Risk = 4*ta.atr(14)
+StatisticsVerticalOffset = 3*ta.atr(14)
+HideStatistics = input(false)
+DisplayEquityCurve = input(false)
+commission = input(title="Estimated commission per round-turn in USD", defval=0.2)
+riskRewardRatio = input.float(defval=3.0, minval=0.0, title="Risk to Reward 1-to-")
+
+///XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+/// Level definitions:
+///XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+tradeactive = false
+tradeactive := nz(tradeactive[1])
+ 
+ 
+    // STOP Level:
+StopLevel = 0.00000
+StopLevel := nz(StopLevel[1])
+ 
+    // Entry Level:
+EntryLevel = 0.00000
+EntryLevel := nz(EntryLevel[1])
+ 
+    // TP Level:
+TPLevel = 0.00000
+TPLevel := nz(TPLevel[1])
+ 
+    // Breakeven Level:
+BELevel = 0.00000
+BELevel := nz(BELevel[1])
+ 
+    // stopdistance
+stopdistance = 0.00000
+stopdistance := nz(stopdistance[1])
+ 
+    // TradeSizeInXBT
+TradeSizeInXBT = 0.00000
+TradeSizeInXBT := nz(TradeSizeInXBT[1])
+ 
+    // TradeSizeInUSD
+TradeSizeInUSD = 0
+TradeSizeInUSD := nz(TradeSizeInUSD[1])
+ 
+    //PositionMarginXBT
+PositionMarginXBT = 0.00000
+PositionMarginXBT := nz(PositionMarginXBT[1])
+ 
+    //MaxPosMarginXBT
+MaxPosMarginXBT = 0.00000
+MaxPosMarginXBT := nz(MaxPosMarginXBT[1])
+ 
+// Long and Short trade definitions:
+//=============================================================
+Longtradeactive = false
+Longtradeactive := Longtradeactive[1]
+ 
+Shorttradeactive = false
+Shorttradeactive := Shorttradeactive[1]
+
+//longCondition = not tradeactive and smma1 > smma2 and smma2 > smma3 and close > smma2 and bullSig 
+//shortCondition = not tradeactive and smma1 < smma2 and smma2 < smma3 and close < smma2 and bearSig 
+
+longCondition = not tradeactive and close > smma4 and close > smma2 and (low < smma2 or low[1] < smma2[1]) and longmarket
+shortCondition = not tradeactive and close < smma4 and close < smma2 and (high > smma2 or high[1] > smma2[1]) and shortmarket
+
+
+//closelong = halow < min(halow[1],halow[2]) and (TenkanSen max(hahigh[1],hahigh[2]) and (TenkanSen>KijunSen or close>SenkouSpanA or close>KijunSen or close>SenkouSpanL or close>ChikouSpan)
+
+// define plot settings for entry, stoploss and target
+show_order_details = true
+transparency = show_order_details ? 0 : 100
+clr_entry = (longCondition or shortCondition) ? color.white : na
+clr_stoploss = (longCondition or shortCondition) ? color.red : na
+clr_target = (longCondition or shortCondition) ? color.lime : na
+ 
+
+//============================================================
+// Alerts for Trade opening
+//============================================================
+alertcondition(longCondition and not longCondition[1], title='Long', message='{{ticker}} LONG') // Original Code
+alertcondition(shortCondition and not shortCondition[1], title='Short', message="{{ticker}} SHORT") // Original Code
+
+//============================================================
+//Plots for trade signal
+//============================================================
+ 
+Longtradetrigger = if (longCondition and not longCondition[1])
+    StopLevel := math.min(low,low[1],low[2])
+    EntryLevel := close
+    TPLevel := EntryLevel + (EntryLevel - StopLevel) * riskRewardRatio
+    BELevel := (EntryLevel - StopLevel) + EntryLevel
+    stopdistance := EntryLevel - StopLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := math.round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+    PositionMarginXBT := (math.round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (math.round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Longtradeactive := true
+
+Shorttradetrigger = if (shortCondition and not shortCondition[1])
+    StopLevel := math.max(high,high[1],high[2])
+    EntryLevel := close
+    TPLevel := EntryLevel - (StopLevel - EntryLevel) * riskRewardRatio
+    BELevel := EntryLevel - (StopLevel - EntryLevel)
+    stopdistance := StopLevel - EntryLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := math.round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+    PositionMarginXBT := (math.round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (math.round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Shorttradeactive := true
+ 
+// PLOT Triggers
+plotshape(Longtradetrigger, title="Arty long", style=shape.triangleup, location=location.belowbar, color=color.lime, text="LONG")
+plotshape(Shorttradetrigger, title="Arty short", style=shape.triangledown, location=location.abovebar, color=color.red, text="SHORT")
+ 
+
+// Plot Levels:
+pl1 = plot (StopLevel, title = "Stop", color=color.red)
+pl2 = plot (EntryLevel, title = "Entry", color=color.white)
+//pl3 = plot (BELevel, title = "BE", color=color.blue)
+pl4 = plot (TPLevel, title = "TP", color=color.green)
+ 
+fill(pl1, pl2, color.new(color.red,65))
+//fill(pl2, pl3, color.new(color.blue,65))
+fill(pl2, pl4, color.new(color.green, 65))
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Define and plot conflicting candles:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+   
+// Subtypes of conflicting bars:
+//-------------------------------------------------------------------------------------------------------
+ 
+// Bartype 3a is a candle which crosses both BELevel and EntryLevel and has its close above the midline between BELevel and EntryLevel (longs)
+// respecively has its close below the midline between BELevel and EntryLevel (shorts)
+// In case of a Bartype 3a the logic shall NOT consider a trade as closed as break-even, but shall assume trade continuation with activated break-even-flag.
+//-------------------------------------------------------------------------------------------------------
+ 
+Bartype3_a_long = high > BELevel and high < TPLevel and low < EntryLevel and low > StopLevel and close > ((BELevel + EntryLevel)/2) and Longtradeactive
+Bartype3_a_short = high > EntryLevel and high  < StopLevel and low < BELevel and low > TPLevel and close < ((BELevel + EntryLevel)/2) and Shorttradeactive
+//barcolor(Bartype3_a_long or Bartype3_a_short? color.purple : na)
+ 
+//Bartype3_a_Counter = 0    
+//Bartype3_a_Counter := nz(Bartype3_a_Counter[1])
+//if Bartype3_a_long or Bartype3_a_short
+//    Bartype3_a_Counter := Bartype3_a_Counter + 1
+ 
+// Bartype 4a is a candle which crosses TPLevel, BELevel and EntryLevel and has its close above BELevel (longs) respectively close below BELevel (shorts)
+// In case of a Bartype 4a the logic shall consider a trade as closed winner and shall not assume trade as closed break-even.
+//-------------------------------------------------------------------------------------------------------
+ 
+Bartype4_a_long = high > TPLevel and low < EntryLevel and low > StopLevel and close > BELevel and Longtradeactive
+Bartype4_a_short = high > EntryLevel and high < StopLevel and low < TPLevel and close < BELevel and Shorttradeactive
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade resolution:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+// Target adjustment
+//shorttpadjust = if((Shorttradeactive == true) and bullE)
+//    y = 1
+
+//if shorttpadjust == true
+//    TPLevel := close-1
+
+//longtpadjust = if((Longtradeactive == true) and bearE)
+//    r = 1
+
+//if longtpadjust == true
+//    TPLevel := close+1
+
+// Stop Adjustment
+
+shortstopleveladjust = if((Shorttradeactive == true) and (smma4 < StopLevel))
+    y = 1
+
+if shortstopleveladjust == true
+    StopLevel := smma4
+
+longstopleveladjust = if((Longtradeactive == true) and (smma4 > StopLevel))
+    r = 1
+
+if longstopleveladjust == true
+    StopLevel := smma4
+
+
+// Breakeven activation
+//-------------------------------------------------------------------------------------------------------
+shorttradeBElevelactivation = (low < BELevel) and not (low < TPLevel)
+longtradeBElevelactivation = (high > BELevel) and not (high> TPLevel)
+ 
+Breakevenactive = false
+Breakevenactive := nz(Breakevenactive[1])
+ 
+if ((Shorttradeactive ==  true) and (shorttradeBElevelactivation == true))
+    Breakevenactive := false
+ 
+if ((Longtradeactive == true) and (longtradeBElevelactivation == true))
+    Breakevenactive := false
+   
+// loss trades
+//-------------------------------------------------------------------------------------------------------
+ 
+PlotLossCounter = 0
+LossShort = 0
+LossLong = 0
+ 
+PlotLossCounter := nz(PlotLossCounter[1])
+LossShort := nz(LossShort[1])
+LossLong := nz(LossLong[1])
+ 
+plotlosshort = if ((Shorttradeactive == true) and (high > StopLevel) and (Breakevenactive == false))
+    y = 1 // only required to make code work
+ 
+plotchar(plotlosshort, char="X", location=location.abovebar, color=color.red, transp=0, offset=0, size=size.small)
+ 
+if plotlosshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    LossShort := LossShort +1
+ 
+   
+//plotlosshort := false
+ 
+plotlosslong = if ((Longtradeactive == true) and (low < StopLevel) and (Breakevenactive == false))
+    r = 1 // only required to make code work
+   
+plotchar(plotlosslong, char="X", location=location.belowbar, color=color.red, transp=0, offset=0, size=size.small)
+ 
+if plotlosslong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    LossLong := LossLong + 1
+   
+//plotlosslong := false
+ 
+// Breakeven trades
+//-------------------------------------------------------------------------------------------------------
+ 
+PlotBreakEvenCounter = 0
+PlotBreakEvenCounter := nz(PlotBreakEvenCounter[1])
+BELong = 0
+BELong := nz(BELong[1])
+BEShort = 0
+BEShort := nz(BEShort[1])
+ 
+plotBreakevenshort = if ((Shorttradeactive ==  true) and (high > EntryLevel) and (Breakevenactive == true) and not Bartype3_a_short and not Bartype4_a_short)
+    h = 1 // only required to make code work
+   
+plotchar(plotBreakevenshort, char="0", location=location.abovebar, color=color.blue, transp=0, offset=0, size=size.small)
+ 
+if plotBreakevenshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotBreakEvenCounter := PlotBreakEvenCounter + 1
+    BEShort := BEShort +1
+ 
+//plotBreakevenshort := false
+ 
+plotBreakevenlong = if ((Longtradeactive ==  true) and (low < EntryLevel) and (Breakevenactive == true) and not Bartype3_a_long and not Bartype4_a_long)
+    e = 1 // only required to make code work
+   
+plotchar(plotBreakevenlong, char="0", location=location.belowbar, color=color.blue, transp=0, offset=0, size=size.small)
+ 
+if plotBreakevenlong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotBreakEvenCounter := PlotBreakEvenCounter + 1
+    BELong := BELong +1
+   
+//plotBreakevenlong := false
+ 
+// Win trades
+//-------------------------------------------------------------------------------------------------------
+PlotWinCounter = 0
+PlotWinCounter := nz(PlotWinCounter[1])
+WinLong = 0
+WinLong := nz(WinLong[1])
+WinShort = 0
+WinShort := nz(WinShort[1])
+ 
+plotWinshort = if ((Shorttradeactive ==  true) and (low < TPLevel))
+    n = 1  // only required to make code work
+ 
+plotchar(plotWinshort, char="✓", location=location.belowbar, color=color.green, transp=0, offset=0, size=size.small)
+ 
+if plotWinshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    WinShort := WinShort +1
+   
+//plotWinshort := false
+ 
+plotWinlong = if ((Longtradeactive ==  true) and (high > TPLevel))
+    l = 1 // only required to make code work
+ 
+plotchar(plotWinlong, char="✓", location=location.abovebar, color=color.green, transp=0, offset=0, size=size.small)
+ 
+if plotWinlong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    WinLong := WinLong +1
+   
+//plotWinlong := false
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade closing signals
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+// c=position e=bitmex-testnet t=market ro=1
+// Original Code Below
+// alertcondition(plotlosshort or plotlosslong or plotBreakevenshort or plotBreakevenlong, title='Lemon Close Trade BE or Stop', message='Lemon Close at BE or Stop')
+// alertcondition(plotWinshort or plotWinlong, title='Lemon Close Trade Win', message='Lemon Win')
+ 
+alertcondition(plotlosshort or plotlosslong or plotBreakevenshort or plotBreakevenlong, title='Lemon Close Trade BE or Stop', message="{{ticker}} Close")
+alertcondition(plotWinshort or plotWinlong, title='Lemon Close Trade Win', message="{{ticker}} Take Profit")
+ 
+
+
+EquityCurve = PlotWinCounter * 2 * USDRiskPerTrade - PlotLossCounter * USDRiskPerTrade - (PlotWinCounter + PlotLossCounter + PlotBreakEvenCounter) * commission
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Statistics
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+//if (plotWinlong or plotWinshort or plotBreakevenlong or plotBreakevenshort or plotlosslong or plotlosshort) and not HideStatistics
+//    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + tostring(PlotWinCounter)
+//      + "\nLoss : " + tostring(PlotLossCounter) + "\nBE : " + tostring(PlotBreakEvenCounter),color = color.white, textcolor=color.white)
+ 
+winpercent = math.round((PlotWinCounter/(PlotWinCounter+PlotLossCounter+PlotBreakEvenCounter)*100))
+losspercent = math.round((PlotLossCounter/(PlotWinCounter+PlotLossCounter+PlotBreakEvenCounter)*100))
+bepercent = math.round((PlotBreakEvenCounter/(PlotWinCounter+PlotLossCounter+PlotBreakEvenCounter)*100))
+rrpercent = math.round((PlotWinCounter/(PlotWinCounter+PlotLossCounter))*100)
+ 
+//if (plotWinlong or plotWinshort or plotBreakevenlong or plotBreakevenshort or plotlosslong or plotlosshort) and not HideStatistics
+//    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + tostring(PlotWinCounter) + " ("+ tostring(winpercent)+")% Long: " +tostring(WinLong) +" Short: "+ tostring(WinShort)
+//      + "\nLoss : " + tostring(PlotLossCounter) +" ("+tostring(losspercent)+")%"+" Long: "+tostring(LossLong)+" Short: "+tostring(LossShort)+"\nBE : " + tostring(PlotBreakEvenCounter)+" ("+ tostring(bepercent)+")% Long: "+tostring(BELong)+" Short: "+tostring(BEShort),color = color.white, textcolor=color.white)
+
+if (plotWinlong or plotWinshort or plotBreakevenlong or plotBreakevenshort or plotlosslong or plotlosshort) and not HideStatistics
+    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + str.tostring(PlotWinCounter) + " ("+ str.tostring(winpercent)+"%)"
+      + "\nLoss : " + str.tostring(PlotLossCounter) +" ("+str.tostring(losspercent)+"%)" + "\nBE : " + str.tostring(PlotBreakEvenCounter)+" ("+ str.tostring(bepercent)+"%)" + "\nRate : " + str.tostring (rrpercent)+"%)",color = color.white, textcolor=color.white)
+      
+
+// The following line is in order to print the equity curve:
+//-------------------------------------------------------------------------------------------------------
+ 
+plot (DisplayEquityCurve == true ? EquityCurve : na, title = "Profit and Loss", color=color.yellow, linewidth=3, style=plot.style_line)
+
+
+strategy.entry("long", strategy.long, 1, when=Longtradetrigger)
+strategy.entry("short", strategy.short, 1, when=Shorttradetrigger)
+strategy.close(id="long", when=(plotlosslong or plotWinlong))
+strategy.close(id="short", when=(plotlosshort or plotWinshort))

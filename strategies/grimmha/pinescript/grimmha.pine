@@ -1,0 +1,72 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © allanster
+
+//@version=5
+indicator(title = "GrimmHA-indicator", shorttitle = "GrimmHA-indicator", overlay = false)
+
+// Revision: 2
+// Author: @allanster
+// Notes: Pine Script v5 update of Pine Script v2 by @samtsui -> https://www.tradingview.com/script/1lgqD3UK-I-Heikin-Ashi-Candle/
+
+haClose = (open + high + low + close) / 4
+haOpen  = float(na)
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (nz(haOpen[1]) + nz(haClose[1])) / 2
+haHigh  = math.max(high, math.max(haOpen, haClose))
+haLow   = math.min(low,  math.min(haOpen, haClose))
+haColor = haClose > haOpen ? color.new(#26a69a, 0) : color.new(#ef5350, 0)
+plotcandle(haOpen, haHigh, haLow, haClose, title = "", color = haColor, wickcolor = haColor, bordercolor = haColor)
+
+
+C_Len = 14 // ema depth for bodyAvg
+C_ShadowPercent = 5.0 // size of shadows
+C_ShadowEqualsPercent = 100.0
+C_DojiBodyPercent = 5.0
+C_Factor = 2.0 // shows the number of times the shadow dominates the candlestick body
+
+C_BodyHi = math.max(haClose, haOpen)
+C_BodyLo = math.min(haClose, haOpen)
+C_Body = C_BodyHi - C_BodyLo
+C_BodyAvg = ta.ema(C_Body, C_Len)
+C_SmallBody = C_Body < C_BodyAvg
+C_LongBody = C_Body > C_BodyAvg
+C_UpShadow = haHigh - C_BodyHi
+C_DnShadow = C_BodyLo - haLow
+C_HasUpShadow = C_UpShadow > C_ShadowPercent / 100 * C_Body
+C_HasDnShadow = C_DnShadow > C_ShadowPercent / 100 * C_Body
+C_WhiteBody = haOpen < haClose
+C_BlackBody = haOpen > haClose
+C_Range = haHigh-haLow
+C_IsInsideBar = C_BodyHi[1] > C_BodyHi and C_BodyLo[1] < C_BodyLo
+C_BodyMiddle = C_Body / 2 + C_BodyLo
+C_ShadowEquals = C_UpShadow == C_DnShadow or (((math.abs(C_UpShadow - C_DnShadow) / C_DnShadow * 100) < C_ShadowEqualsPercent) and ((math.abs(C_DnShadow - C_UpShadow) / C_UpShadow * 100) < C_ShadowEqualsPercent))
+C_IsDojiBody = C_Range > 0 and C_Body <= C_Range * C_DojiBodyPercent / 100
+C_Doji = C_IsDojiBody and C_ShadowEquals
+
+patternLabelPosLow = haLow - (ta.atr(30) * 0.6)
+patternLabelPosHigh = haHigh + (ta.atr(30) * 0.6)
+
+label_color_neutral = input(color.gray, "Label Color Neutral")
+C_DojiNumberOfCandles = 1
+C_DragonflyDoji = C_IsDojiBody and C_UpShadow <= C_Body
+C_GravestoneDojiOne = C_IsDojiBody and C_DnShadow <= C_Body
+alertcondition(C_Doji and not C_DragonflyDoji and not C_GravestoneDojiOne, title = "New pattern detected", message = "New Doji pattern detected")
+//if C_Doji and not C_DragonflyDoji and not C_GravestoneDojiOne
+//    var ttDoji = "Doji\nWhen the open and close of a security are essentially equal to each other, a doji candle forms. The length of both upper and lower shadows may vary, causing the candlestick you are left with to either resemble a cross, an inverted cross, or a plus sign. Doji candles show the playout of buyer-seller indecision in a tug-of-war of sorts. As price moves either above or below the opening level during the session, the close is either at or near the opening level."
+//    label.new(bar_index, patternLabelPosLow, text="D", style=label.style_label_up, color = label_color_neutral, textcolor=color.white, tooltip = ttDoji)
+//bgcolor(highest(C_Doji?1:0, C_DojiNumberOfCandles)!=0 ? color.gray : na, offset=-(C_DojiNumberOfCandles-1))
+
+herebedoji = C_Doji and not C_DragonflyDoji and not C_GravestoneDojiOne
+
+BullLabel = "Bullish HA"
+BearLabel = "Bearish HA"
+BullHA = haLow == haOpen and haClose > haOpen and herebedoji[1]
+BearHA = haHigh == haOpen and haClose < haOpen and herebedoji[1]
+
+barcolor( BullHA ? color.yellow : BearHA ? color.white :na)
+
+plotshape(BullHA, title="Bullish HA", style=shape.triangleup, location=location.belowbar, color=color.lime, text=BullLabel)
+plotshape(BearHA, title="Bearish HA", style=shape.triangledown, location=location.abovebar, color=color.red, text=BearLabel)
+
+// alerts
+alertcondition(BullHA, title='Bullish HA Alert', message='{{ticker}} - Bullish HA')
+alertcondition(BearHA, title='Bearish HA Alert', message='{{ticker}} - Bearish HA')

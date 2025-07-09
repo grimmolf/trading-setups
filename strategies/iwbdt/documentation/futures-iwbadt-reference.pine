@@ -1,0 +1,577 @@
+//@version=4
+study("FUTURES-IWBADT", "FUTURES-IWBADT Trading-Bot", overlay=true)
+
+// Inputs
+FirstAddTF = input(title="First additional Timeframe", type=input.resolution, defval="60")
+SecondAddTF = input(title="Second additional Timeframe", type=input.resolution, defval="240")
+ThirdAddTF = input(title="Third additional Timeframe", type=input.resolution, defval="D")
+
+EMA_Short_period = input(defval=9, title="EMA Period Short", type=input.integer)
+EMA_Long_period = input(defval=18, title="EMA Period Long", type=input.integer)
+
+//Min_Trade_Risk = input(defval=10, title="Min stop-distance in USD", type=input.float)
+//Max_Trade_Risk = input(defval=60, title="Max stop-distance in USD", type=input.float)
+Min_Trade_Risk = atr(14)
+Max_Trade_Risk = 2*atr(14)
+
+rr = input(defval=2, title="Risk Reward Target", type=input.integer)
+
+Leverage = input(1)
+USDRiskPerTrade = input(defval=20, title="Fixed risk amount per trade in USD", type=input.integer)
+
+IncludeCT = input(defval=false, title="Include Current Time Frame EMA-cross in trend definition", type=input.bool)
+
+
+
+low_m1 = security(syminfo.tickerid, "1", low)
+high_m1 = security(syminfo.tickerid, "1", high)
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+//Calculate Bull or Bear Trend Longer Time Frames
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+//Get the data
+FirstAddTF_ema_short = security(syminfo.tickerid, FirstAddTF, ema(close, EMA_Short_period))
+FirstAddTF_ema_long = security(syminfo.tickerid, FirstAddTF, ema(close, EMA_Long_period))
+SecondAddTF_ema_short = security(syminfo.tickerid, SecondAddTF, ema(close, EMA_Short_period))
+SecondAddTF_ema_long = security(syminfo.tickerid, SecondAddTF, ema(close, EMA_Long_period))
+ThirdAddTF_ema_short = security(syminfo.tickerid, ThirdAddTF, ema(close, EMA_Short_period))
+ThirdAddTF_ema_long = security(syminfo.tickerid, ThirdAddTF, ema(close, EMA_Long_period))
+
+
+// Bull
+FirstAddTF_Bull = if (FirstAddTF_ema_short > FirstAddTF_ema_long)
+    1
+else
+    0
+SecondAddTF_Bull = if (SecondAddTF_ema_short > SecondAddTF_ema_long)
+    1
+else
+    0
+ThirdAddTF_Bull = if (ThirdAddTF_ema_short > ThirdAddTF_ema_long)
+    1
+else
+    0
+L_TF_Bull =  if (FirstAddTF_Bull + SecondAddTF_Bull + ThirdAddTF_Bull == 3)
+    true
+else
+    false
+    
+L_TF_Bull_partial =  if (FirstAddTF_Bull + SecondAddTF_Bull + ThirdAddTF_Bull == 2)
+    true
+else
+    false
+
+// Bear
+FirstAddTF_Bear = if (FirstAddTF_ema_short < FirstAddTF_ema_long)
+    1
+else
+    0
+SecondAddTF_Bear = if (SecondAddTF_ema_short < SecondAddTF_ema_long)
+    1
+else
+    0
+ThirdAddTF_Bear = if (ThirdAddTF_ema_short < ThirdAddTF_ema_long)
+    1
+else
+    0
+L_TF_Bear =  if (FirstAddTF_Bear + SecondAddTF_Bear + ThirdAddTF_Bear == 3)
+    true
+else
+    false
+    
+L_TF_Bear_partial =  if (FirstAddTF_Bear + SecondAddTF_Bear + ThirdAddTF_Bear == 2)
+    true
+else
+    false
+
+//Calculate ema Values in current time Frame
+ctf_ema_short = ema(close, EMA_Short_period)
+ctf_ema_long = ema(close, EMA_Long_period)
+
+//Calculate Bull or Bear (including trend of current time frame)
+
+CT_Bull = if ctf_ema_short > ctf_ema_long
+    1
+else
+    0
+
+
+CT_Bear = if ctf_ema_short < ctf_ema_long
+    1
+else
+    0
+
+All_TF_Bull = if (FirstAddTF_Bull + SecondAddTF_Bull + ThirdAddTF_Bull + CT_Bull == 4)
+    true
+else
+    false
+All_TF_Bear = if (FirstAddTF_Bear + SecondAddTF_Bear + ThirdAddTF_Bear + CT_Bear == 4)
+    true
+else
+    false
+
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+//Plot Background
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+HideBackground = input(defval=false, title="Hide colored background", type=input.bool)
+
+
+
+BullTrend = if IncludeCT == true
+    All_TF_Bull
+else
+    L_TF_Bull
+
+BearTrend = if IncludeCT == true
+    All_TF_Bear
+else
+    L_TF_Bear
+
+
+alertcondition(BullTrend, title='IWBADT Trend Alert Bull', message='IWBADT Bull-Trend Activated')
+alertcondition(BearTrend, title='IWBADT Trend Alert Bear', message='IWBADT Bear-Trend Activated')
+
+
+//plot(BullTrend, title='Bull', color=color.green, style=plot.style_line, linewidth=1, transp=0) 
+//plot(BearTrend, title='Bear', color=color.red, style=plot.style_line, linewidth=1, transp=0)
+
+bgcolorBullTransp = input(defval=55, title="All TF Bull Color Transparency", type=input.integer)
+bgcolorBullPartialTransp = input(defval=70, title="Partial TF Bull Color Transparency", type=input.integer)
+bgcolorBearTransp = input(defval=55, title="All TF Bear Color Transparency", type=input.integer)
+bgcolorBearPartialTransp = input(defval=70, title="Partial TF Bear Color Transparency", type=input.integer)
+
+BGColorBull = color.green
+BGColorBullPartial = color.teal
+BGColorBear = color.red
+BGColorBearPartial = color.maroon
+
+BGColor0 = iff(BullTrend == true and HideBackground == false, BGColorBull, na) 
+BGColor1 = iff(BearTrend == true and HideBackground == false, BGColorBear, na)
+BGColor2 = iff(L_TF_Bull_partial == true and HideBackground == false, BGColorBullPartial, na)
+BGColor3 = iff(L_TF_Bear_partial == true and HideBackground == false, BGColorBearPartial, na)
+
+
+bgcolor(BGColor0, bgcolorBullTransp, 0)
+bgcolor(BGColor1, bgcolorBearTransp, 0)
+bgcolor(BGColor2, bgcolorBullPartialTransp, 0)
+bgcolor(BGColor3, bgcolorBearPartialTransp, 0)
+
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// FRACTALS Alerts
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+//topfractal = high[3] < high[2] and high[2] > high[1] and low[3] < low[2] and low[2] > low [1] and BearTrend == true
+topfractal = high[3] < high[2] and high[2] > high[1] and BearTrend == true
+
+//botfractal = low[3] > low[2] and low[2] < low[1] and high[3] > high[2] and high[2] < high [1] and BullTrend == true
+botfractal = low[3] > low[2] and low[2] < low[1] and BullTrend == true
+
+plotchar(topfractal, char="ˆ", location=location.abovebar, color=color.red, transp=0, offset=-2, size=size.small)
+plotchar(botfractal, char="ˬ", location=location.belowbar, color=color.lime, transp=0, offset=-2, size=size.small)
+
+alertcondition(topfractal, title='IWBADT Fractal Alert Top', message='Top Fractal Alert')
+alertcondition(botfractal, title='IWBADT Fractal Alert Bottom', message='Bottom Fractal Alert')
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// FRACTALS Trade indications:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
+//;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+tradeactive = false
+tradeactive := nz(tradeactive[1])
+
+topfractalconfirmed = false
+//topfractalconfirmed := nz(topfractalconfirmed[1])
+
+botfractalconfirmed = false
+//botfractalconfirmed := nz(botfractalconfirmed[1])
+
+
+//:::::::::::::::::::::::::::::::::::::::::::::::
+//topfractalconfirmed := high[3] < high[2] and high[2] > high[1] and low[3] < low[2] and low[2] > low [1] and BearTrend == true
+//and low < low[1] and tradeactive == false
+topfractalconfirmed := high[3] < high[2] and high[2] > high[1] and BearTrend == true and low < low[1] and tradeactive == false 
+ and (high[2] - low[1]) > Min_Trade_Risk and (high[2] - low[1]) < Max_Trade_Risk
+
+//botfractalconfirmed := low[3] > low[2] and low[2] < low[1] and high[3] > high[2] and high[2] < high [1] and BullTrend == true 
+//and high > high[1] and tradeactive == false
+botfractalconfirmed := low[3] > low[2] and low[2] < low[1] and BullTrend == true and high > high[1] and tradeactive == false 
+ and high[1] - low[2] > Min_Trade_Risk and high[1] - low[2] < Max_Trade_Risk
+
+plotchar(topfractalconfirmed, char="↓", location=location.abovebar, color=color.yellow, transp=0, offset=0, size=size.small)
+plotchar(botfractalconfirmed, char="↑", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.small)
+
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Level definitions:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+    // STOP Level:
+StopLevel = 0.00000
+StopLevel := nz(StopLevel[1])
+
+    // Entry Level:
+EntryLevel = 0.00000
+EntryLevel := nz(EntryLevel[1])
+
+    // TP Level:
+TPLevel = 0.00000
+TPLevel := nz(TPLevel[1])
+
+    // Breakeven Level:
+BELevel = 0.00000
+BELevel := nz(BELevel[1])
+
+    // stopdistance
+stopdistance = 0.00000
+stopdistance := nz(stopdistance[1])
+
+    // TradeSizeInXBT
+TradeSizeInXBT = 0.00000
+TradeSizeInXBT := nz(TradeSizeInXBT[1])
+
+    // TradeSizeInUSD
+TradeSizeInUSD = 0
+TradeSizeInUSD := nz(TradeSizeInUSD[1])
+
+    //PositionMarginXBT
+PositionMarginXBT = 0.00000
+PositionMarginXBT := nz(PositionMarginXBT[1])
+
+    //MaxPosMarginXBT
+MaxPosMarginXBT = 0.00000
+MaxPosMarginXBT := nz(MaxPosMarginXBT[1])
+
+// Long and Short trade definitions:
+
+
+Longtradeactive = false
+Longtradeactive := Longtradeactive[1]
+
+Shorttradeactive = false
+Shorttradeactive := Shorttradeactive[1]
+
+
+Shorttradetrigger = if (topfractalconfirmed == true)
+    StopLevel := high[2]
+    EntryLevel := min(low[1], open)
+    TPLevel := EntryLevel - (rr * (StopLevel - EntryLevel))
+    BELevel := EntryLevel - (StopLevel - EntryLevel)
+    stopdistance := StopLevel - EntryLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := round(EntryLevel * TradeSizeInXBT / 1000)  //remove factor 1000 for live trading
+    PositionMarginXBT := (round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Shorttradeactive := true
+
+
+topfractalconfirmed := false
+
+
+Longtradetrigger = if (botfractalconfirmed == true)
+    StopLevel := low[2]
+    EntryLevel := max(high[1], open)
+    TPLevel := rr *(EntryLevel - StopLevel) + EntryLevel
+    BELevel := (EntryLevel - StopLevel) + EntryLevel
+    stopdistance := EntryLevel - StopLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+    PositionMarginXBT := (round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Longtradeactive := true
+
+
+botfractalconfirmed := false
+
+// Plot Levels:
+
+p1 = plot (StopLevel, title = "stoplevel", color=color.red)
+p2 = plot (EntryLevel, title = "entrylevel", color=color.white)
+p3 = plot (BELevel, title = "breakevenlevel", color=color.blue)
+p4 = plot (TPLevel, title = "TPlevel", color=color.green)
+
+fill(p1, p2, color=color.red, transp=65)
+fill(p2, p3, color=color.blue, transp=65)
+fill(p3, p4, color=color.green, transp=65)
+
+
+//plot_08 = plot (Leverage, title = "Leverage", color=color.green)
+//plot_09 = plot (TradeSizeInUSD, title = "TradeSizeInUSD", color=color.green)
+
+//alertcondition(Shorttradetrigger, title='IWBADT Entry Trade Sig Short', message='b=short e=deribit l={{plot("Leverage")}} q={{plot("TradeSizeInUSD")}} t=market')
+alertcondition(Shorttradetrigger, title='IWBADT Entry Trade Sig Short', message='e=bitmex s={{ticker}} b=short l=100 q=5% t=market')
+if Shorttradeactive == true
+    Shorttradetrigger := false
+    
+//alertcondition(Longtradetrigger, title='IWBADT Entry Trade Sig Long', message='b=long e=deribit l={{plot("Leverage")}} q={{plot("TradeSizeInUSD")}} t=market')
+alertcondition(Longtradetrigger, title='IWBADT Entry Trade Sig Long', message='e=bitmex s={{ticker}} b=long l=100 q=5% t=market')
+
+if Longtradeactive == true
+    Longtradetrigger := false
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Define and plot conflicting candles:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+    
+// Subtypes of conflicting bars:
+//-------------------------------------------------------------------------------------------------------
+
+// Bartype 3a is a candle which crosses both BELevel and EntryLevel and has its close above the midline between BELevel and EntryLevel (longs) 
+// respecively has its close below the midline between BELevel and EntryLevel (shorts) 
+// In case of a Bartype 3a the logic shall NOT consider a trade as closed as break-even, but shall assume trade continuation with activated break-even-flag.
+//-------------------------------------------------------------------------------------------------------
+
+Bartype3_a_long = high > BELevel and high < TPLevel and low < EntryLevel and low > StopLevel and close > ((BELevel + EntryLevel)/2) and Longtradeactive
+Bartype3_a_short = high > EntryLevel and high  < StopLevel and low < BELevel and low > TPLevel and close < ((BELevel + EntryLevel)/2) and Shorttradeactive
+//barcolor(Bartype3_a_long or Bartype3_a_short? color.purple : na)
+
+//Bartype3_a_Counter = 0    
+//Bartype3_a_Counter := nz(Bartype3_a_Counter[1])
+//if Bartype3_a_long or Bartype3_a_short
+//    Bartype3_a_Counter := Bartype3_a_Counter + 1
+
+// Bartype 4a is a candle which crosses TPLevel, BELevel and EntryLevel and has its close above BELevel (longs) respectively close below BELevel (shorts)
+// In case of a Bartype 4a the logic shall consider a trade as closed winner and shall not assume trade as closed break-even.
+//-------------------------------------------------------------------------------------------------------
+
+Bartype4_a_long = high > TPLevel and low < EntryLevel and low > StopLevel and close > BELevel and Longtradeactive
+Bartype4_a_short = high > EntryLevel and high < StopLevel and low < TPLevel and close < BELevel and Shorttradeactive
+//barcolor(Bartype4_a_long or Bartype4_a_short? color.purple : na)
+
+//Bartype4_a_Counter = 0    
+//Bartype4_a_Counter := nz(Bartype4_a_Counter[1])
+//if Bartype4_a_long or Bartype4_a_short
+//    Bartype4_a_Counter := Bartype4_a_Counter + 1
+    
+// Definition of Maintypes of conflicting bars:  ONLY USED FOR CODE OPTIMISATION AND STATS OF UNCERTAINTY
+//-------------------------------------------------------------------------------------------------------
+
+//Bartype 3:  Candle range crosses both BELevel and EntryLevel
+//-------------------------------------------------------------------------------------------------------
+// = high > BELevel and high < TPLevel and low < EntryLevel and low > StopLevel and Longtradeactive and not Bartype3_a_long
+//Bartype3_short = high > EntryLevel and high  < StopLevel and low < BELevel and low > TPLevel and Shorttradeactive and not Bartype3_a_short
+//barcolor(Bartype3_long or Bartype3_short? color.yellow : na)
+
+
+//Bartype 4:  Candle range crosses EntryLevel, BELevel and TPLevel
+//-------------------------------------------------------------------------------------------------------
+//Bartype4_long = high > TPLevel and low < EntryLevel and low > StopLevel and Longtradeactive and not Bartype4_a_long
+//Bartype4_short = high > EntryLevel and high < StopLevel and low < TPLevel and Shorttradeactive and not Bartype4_a_short
+//barcolor(Bartype4_long or Bartype4_short? color.orange : na)
+
+//Bartype 5:  Candle range crosses StopLevel, EntryLevel and BELevel
+//-------------------------------------------------------------------------------------------------------
+//Bartype5_long = high > BELevel and high < TPLevel and low < StopLevel and Longtradeactive
+//Bartype5_short = high > StopLevel and low < BELevel and low > TPLevel and Shorttradeactive
+//barcolor(Bartype5_long or Bartype5_short? color.white : na)
+
+//Bartype 6:  Candle range crosses StopLevel, EntryLevel, BELevel and TPLevel
+//-------------------------------------------------------------------------------------------------------
+//Bartype6_long = high > TPLevel and low < StopLevel and Longtradeactive
+//Bartype6_short = high > StopLevel and low < TPLevel and Shorttradeactive
+//barcolor(Bartype6_long or Bartype6_short? color.blue : na)
+
+//Bartype counters
+//-------------------------------------------------------------------------------------------------------
+//Bartype3Counter = 0
+//Bartype3Counter := nz(Bartype3Counter[1])
+//if Bartype3_long or Bartype3_short
+//    Bartype3Counter := Bartype3Counter + 1
+
+//Bartype4Counter = 0
+//Bartype4Counter := nz(Bartype4Counter[1])
+//if Bartype4_long or Bartype4_short
+//    Bartype4Counter := Bartype4Counter + 1
+
+//Bartype5Counter = 0
+//Bartype5Counter := nz(Bartype5Counter[1])
+//if Bartype5_long or Bartype5_short
+//    Bartype5Counter := Bartype5Counter + 1
+
+//Bartype6Counter = 0    
+//Bartype6Counter := nz(Bartype6Counter[1])
+//if Bartype6_long or Bartype6_short
+//    Bartype6Counter := Bartype6Counter + 1
+
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade resolution:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+// Breakeven activation
+//-------------------------------------------------------------------------------------------------------
+shorttradeBElevelactivation = (low < BELevel) and not (low_m1 < TPLevel)
+longtradeBElevelactivation = (high > BELevel) and not (high_m1 > TPLevel)
+
+Breakevenactive = false
+Breakevenactive := nz(Breakevenactive[1])
+
+if ((Shorttradeactive ==  true) and (shorttradeBElevelactivation == true))
+    Breakevenactive := true
+
+if ((Longtradeactive == true) and (longtradeBElevelactivation == true))
+    Breakevenactive := true
+    
+// loss trades
+//-------------------------------------------------------------------------------------------------------
+
+PlotLossCounter = 0
+PlotLossCounter := nz(PlotLossCounter[1])
+
+plotlosshort = if ((Shorttradeactive == true) and (high > StopLevel) and (Breakevenactive == false))
+    y = 1 // only required to make code work
+
+plotchar(plotlosshort, char="X", location=location.abovebar, color=color.fuchsia, transp=0, offset=0, size=size.small)
+
+if plotlosshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    
+//plotlosshort := false
+
+plotlosslong = if ((Longtradeactive == true) and (low < StopLevel) and (Breakevenactive == false))
+    r = 1 // only required to make code work
+    
+plotchar(plotlosslong, char="X", location=location.belowbar, color=color.fuchsia, transp=0, offset=0, size=size.small)
+
+if plotlosslong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    
+//plotlosslong := false
+
+// Breakeven trades
+//-------------------------------------------------------------------------------------------------------
+
+PlotBreakEvenCounter = 0
+PlotBreakEvenCounter := nz(PlotBreakEvenCounter[1])
+
+plotBreakevenshort = if ((Shorttradeactive ==  true) and (high > EntryLevel) and (Breakevenactive == true) and not Bartype3_a_short and not Bartype4_a_short)
+    h = 1 // only required to make code work
+    
+plotchar(plotBreakevenshort, char="0", location=location.abovebar, color=color.blue, transp=0, offset=0, size=size.small)
+
+if plotBreakevenshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotBreakEvenCounter := PlotBreakEvenCounter + 1
+
+//plotBreakevenshort := false
+
+plotBreakevenlong = if ((Longtradeactive ==  true) and (low < EntryLevel) and (Breakevenactive == true) and not Bartype3_a_long and not Bartype4_a_long)
+    e = 1 // only required to make code work
+    
+plotchar(plotBreakevenlong, char="0", location=location.belowbar, color=color.blue, transp=0, offset=0, size=size.small)
+
+if plotBreakevenlong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotBreakEvenCounter := PlotBreakEvenCounter + 1
+    
+//plotBreakevenlong := false 
+
+// Win trades
+//-------------------------------------------------------------------------------------------------------
+PlotWinCounter = 0
+PlotWinCounter := nz(PlotWinCounter[1])
+
+plotWinshort = if ((Shorttradeactive ==  true) and (low < TPLevel))
+    n = 1  // only required to make code work
+
+plotchar(plotWinshort, char="1", location=location.belowbar, color=color.green, transp=0, offset=0, size=size.small)
+
+if plotWinshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    
+//plotWinshort := false
+
+plotWinlong = if ((Longtradeactive ==  true) and (high > TPLevel))
+    l = 1 // only required to make code work
+
+plotchar(plotWinlong, char="1", location=location.abovebar, color=color.green, transp=0, offset=0, size=size.small)
+
+if plotWinlong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    
+//plotWinlong := false
+
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade closing signals
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+alertcondition(plotlosshort or plotlosslong or plotBreakevenshort or plotBreakevenlong, title='IWBADT Close Trade BE or Stop', message='e=bitmex s={{ticker}} c=position q=100% t=market')
+alertcondition(plotWinshort or plotWinlong, title='IWBADT Close Trade Win', message='e=bitmex s={{ticker}} c=position q=100% t=market')
+
+
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Statistics
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+//PercentConflictingTrades = round(((Bartype3Counter + Bartype4Counter + Bartype5Counter + Bartype6Counter) / (PlotWinCounter + PlotLossCounter + PlotBreakEvenCounter))*100)
+
+StatisticsVerticalOffset = atr(14)
+HideStatistics = input(false)
+DisplayEquityCurve = input(false)
+
+commission = input(title="Estimated commission per round-turn in USD", defval=0.1744)
+
+EquityCurve = PlotWinCounter * 2 * USDRiskPerTrade - PlotLossCounter * USDRiskPerTrade - (PlotWinCounter + PlotLossCounter + PlotBreakEvenCounter) * commission
+
+
+if (plotWinlong or plotWinshort or plotBreakevenlong or plotBreakevenshort or plotlosslong or plotlosshort) and not HideStatistics
+    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + tostring(PlotWinCounter) 
+      + "\nLoss : " + tostring(PlotLossCounter) + "\nBE : " + tostring(PlotBreakEvenCounter) + "\nPnL : " + tostring(EquityCurve)
+//       + "\nBartype3 : " + tostring(Bartype3Counter)
+//       + "\nBartype4 : " + tostring(Bartype4Counter) 
+//            + "\nBartype5 : " + tostring(Bartype5Counter)
+//              + "\nBartype6 : " + tostring(Bartype6Counter)+ "\nConflictTrade% : " + tostring(PercentConflictingTrades) + "%"
+//                + "\nBartype3_a : " + tostring(Bartype3_a_Counter)
+//         + "\nBartype4_a : " + tostring(Bartype4_a_Counter)
+         + "\nSizeUSD : " + tostring(TradeSizeInUSD)
+          + "\nPosMargXBT : " + tostring(PositionMarginXBT)
+           + "\nMaxPosMargXBT : " + tostring(MaxPosMarginXBT)
+             ,color = color.white, textcolor=color.white)
+
+
+
+// The following line is in order to print the equity curve:
+//-------------------------------------------------------------------------------------------------------
+
+plot (DisplayEquityCurve == true ? EquityCurve : na, title = "Profit and Loss", color=color.yellow, linewidth=3, style=plot.style_line) 
+
+
+
+
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Debugging tools
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+//plotchar(Longtradeactive, char="L", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.small)  
+//plotchar(Shorttradeactive, char="S", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.small) 
+//plotchar(Breakevenactive, char="B", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.tiny) 
+//plotchar(tradeactive, char="T", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.tiny) 
+//plotchar(BearTrend, char="o", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.tiny) 
+//plotchar(BullTrend, char="i", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.tiny) 
+//plotchar(Shorttradetrigger, char="s", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.tiny) 

@@ -1,0 +1,447 @@
+//@version=4
+//GitLemon
+study(title="Squeeze2backtester", shorttitle="Squeeze2backtester", overlay=true, precision=8)
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 
+// INPUTS
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+src = input(title="Source", type=input.source, defval=close)
+
+Leverage = input(1)
+USDRiskPerTrade = input(defval=1, title="Fixed risk amount per trade in USD", type=input.integer) // Changing to $1 from $50
+
+HideStatistics = input(false)
+DisplayEquityCurve = input(false)
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// commission = input(title="Estimated commission per round-turn in USD", defval=0.1744)
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+commission = input(title="Estimated commission per round-turn in USD", defval=0.2)
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// FOR TTM SQUEEZE MODULE
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+strict = input(false, title="Enabled (original) or Disabled (strict)")
+length = input(20, minval=1, title="BB Length")
+mult = input(2.0, minval=0.001, maxval=50, title="StDev")
+
+useTrueRange = input(true)
+klength = input(20, minval=1, title="Keltner Length")
+kmult = input(2.0, title="Multiplier")
+ksrc = input(close, title="Keltner Source")
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// NON-INPUT VARIABLES
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Min_Trade_Risk = 2*atr(14)
+Max_Trade_Risk = 4*atr(14)
+StatisticsVerticalOffset = 3*atr(14)
+ 
+low_m1 = security(syminfo.tickerid, "1", low)
+high_m1 = security(syminfo.tickerid, "1", high)
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 
+// FOR SQUEEZE MODULE
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+[basis, upper, lower] = bb(src,length,mult)
+[kmiddle, kupper, klower] = kc(ksrc,klength,kmult)
+
+bband(length, mult) =>
+    sma(close, length) + mult * stdev(close, length)
+keltner(length, mult) =>
+    ema(close, length) + mult * ema(tr, length)
+   
+diff = bband(length, mult) - keltner(length, kmult)
+ 
+ 
+///XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+/// Level definitions:
+///XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+tradeactive = false
+tradeactive := nz(tradeactive[1])
+ 
+ 
+    // STOP Level:
+StopLevel = 0.00000
+StopLevel := nz(StopLevel[1])
+ 
+    // Entry Level:
+EntryLevel = 0.00000
+EntryLevel := nz(EntryLevel[1])
+ 
+    // TP Level:
+TPLevel = 0.00000
+TPLevel := nz(TPLevel[1])
+ 
+    // Breakeven Level:
+BELevel = 0.00000
+BELevel := nz(BELevel[1])
+ 
+    // stopdistance
+stopdistance = 0.00000
+stopdistance := nz(stopdistance[1])
+ 
+    // TradeSizeInXBT
+TradeSizeInXBT = 0.00000
+TradeSizeInXBT := nz(TradeSizeInXBT[1])
+ 
+    // TradeSizeInUSD
+TradeSizeInUSD = 0
+TradeSizeInUSD := nz(TradeSizeInUSD[1])
+ 
+    //PositionMarginXBT
+PositionMarginXBT = 0.00000
+PositionMarginXBT := nz(PositionMarginXBT[1])
+ 
+    //MaxPosMarginXBT
+MaxPosMarginXBT = 0.00000
+MaxPosMarginXBT := nz(MaxPosMarginXBT[1])
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 
+// Long and Short trade definitions:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Longtradeactive = false
+Longtradeactive := Longtradeactive[1]
+ 
+Shorttradeactive = false
+Shorttradeactive := Shorttradeactive[1]
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 
+//CALCULATIONS
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+vw = vwap(src)
+
+limitPeriod = input(defval=false, title="Limit period (increases perfomance)")
+lengthPeriod = input(245, minval=1, title="Length of period (hours)")
+ 
+hours_in_milliseconds = 1000 * 60 * 60
+withinPeriod = not limitPeriod or timenow - time < hours_in_milliseconds * lengthPeriod
+ 
+show_order_details = true
+entrySource = input(title="Entry Source", type=input.source, defval=close)
+stopLossSource = input(title="Stop Source", type=input.source, defval=open)
+stopLossPercentage = input(defval=0.033, minval=0, maxval=100, step=0.01, title="Stop loss %")
+riskRewardRatio = input(defval=4.669, minval=0.0, title="Risk to Reward 1-to-")
+ 
+SQON = strict and diff < 0 ? true : not strict and kupper > upper and klower < lower ? true : false
+mid_color = SQON ? color.red : color.green
+BREAKLONG = upper < kupper and lower < klower
+BREAKSHORT = upper > kupper and lower > klower
+FIRESHORT = close < kupper and close < vw
+FIRELONG = close > kupper and close > vw
+ 
+longCondition = not Longtradeactive and SQON[1] and not SQON and BREAKLONG
+shortCondition = not Shorttradeactive and SQON[1] and not SQON and BREAKSHORT
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// calculate entry, stoploss and target
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+entrySourceLong = entrySource == low ? high : entrySource
+entrySourceShort = entrySource == high ? low : entrySource
+stopSourceLong = stopLossSource == high ? low : stopLossSource
+stopSourceShort = stopLossSource == low ? high : stopLossSource
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// define plot settings for entry, stoploss and target
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+transparency = show_order_details ? 0 : 100
+clr_entry = (longCondition or shortCondition) ? color.white : na
+clr_stoploss = (longCondition or shortCondition) ? color.red : na
+clr_target = (longCondition or shortCondition) ? color.lime : na
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 
+//FOR SQUEEZE MODULE
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+e1 = (highest(high, length) + lowest(low, length)) / 2 + sma(close, length)
+osc = linreg(close - e1 / 2, length, 0)
+osc_color = osc[1] < osc[0] ? osc[0] >= 0 ? #00ffff : #cc00cc : osc[0] >= 0 ? #009b9b : #ff9bff
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Alerts for Trade opening
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Added by Joshua 2-10-20 for Autoview
+// plot(entry_buy, title='Entry Buy', transp=100)
+// e=bitmex-testnet s=xbtusd b=long q=100 fp={{plot(\"Entry Buy\")}} l=10 t=limit
+ 
+// Going to use market orders at first.
+// SYNTAX FOR AUTOVIEW //
+// b=long e=bitmex-testnet l={{plot("Leverage")}} q={{plot("TradeSizeInUSD")}} t=market // From Peter - Go Long
+// b=short e=bitmex-testnet l={{plot("Leverage")}} q={{plot("TradeSizeInUSD")}} t=market // From Peter - Go Short
+// c=position e=bitmex-testnet t=market ro=1 // Closes all open positions at market w/ reduce only flag - Closing Signals Alert // Tested Successfully
+// message="e=bitmex-testnet s=xbtusd b=long q=100 fp={{plot(\"Entry Buy\")}} l=10 t=limit"    
+// alertcondition(close > 0, title='Lemon Entry Trade Sig Long', message="e=bitmex-testnet s=xbtusd b=long q={{plot(\"TradeSizeInUSD\")}} l=1 t=market") // added close>0 for testing
+//alertcondition(show and longCondition and not longCondition[1] and SQON, title='Lemon Entry Trade Sig Long', message='{{ticker}} LONG') // Original Code
+// alertcondition(show and longCondition and not longCondition[1] and SQON, title='Lemon Entry Trade Sig Long', message="e=bitmex-testnet s=xbtusd b=long q={{plot(\"TradeSizeInUSD\")}} l=1 t=market") // Orig
+ 
+// alertcondition(high > 0, title='Lemon Entry Trade Sig Short', message="e=bitmex-testnet s=xbtusd b=short q={{plot(\"TradeSizeInUSD\")}} l=1 t=market") // added close>0 for testing
+//alertcondition(show and shortCondition and not shortCondition[1] and SQON, title='Lemon Entry Trade Sig Short', message="{{ticker}} SHORT") // Original Code
+// alertcondition(show and shortCondition and not shortCondition[1] and SQON, title='Lemon Entry Trade Sig Short', message="e=bitmex-testnet s=xbtusd b=short q={{plot(\"TradeSizeInUSD\")}} l=1 t=market")
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+//Plots for trade signal
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+//Shorttradetrigger = if (show and shortCondition and not shortCondition[1] and SQON[1] and not SQON and FIRESHORT)
+//    StopLevel := highest_1 * ((100 + stopLossPercentage) / 100)
+//    EntryLevel := entrySourceShort[M_pointE]
+//    TPLevel := EntryLevel - (StopLevel - EntryLevel) * riskRewardRatio
+//    BELevel := EntryLevel - (StopLevel - EntryLevel)
+//    stopdistance := StopLevel - EntryLevel
+//    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+//    TradeSizeInUSD := round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+//    PositionMarginXBT := (round(100000 * TradeSizeInXBT / Leverage)) / 100000
+//    MaxPosMarginXBT := (round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+//    tradeactive := true
+//    Shorttradeactive := true
+
+Shorttradetrigger = if (shortCondition and FIRESHORT)
+    StopLevel := kupper
+    EntryLevel := close
+    TPLevel := EntryLevel - (StopLevel - EntryLevel) * riskRewardRatio
+    BELevel := EntryLevel - (StopLevel - EntryLevel)
+    stopdistance := StopLevel - EntryLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+    PositionMarginXBT := (round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Shorttradeactive := true
+
+
+//Longtradetrigger = if (show and longCondition and not longCondition[1] and SQON[1] and not SQON and FIRELONG)
+//    StopLevel := lowest_1 * ((100 - stopLossPercentage) / 100)
+//    EntryLevel := entrySourceLong[W_pointE]
+//    TPLevel := EntryLevel + (EntryLevel - StopLevel) * riskRewardRatio
+//    BELevel := (EntryLevel - StopLevel) + EntryLevel
+//    stopdistance := EntryLevel - StopLevel
+//    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+//    TradeSizeInUSD := round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+//    PositionMarginXBT := (round(100000 * TradeSizeInXBT / Leverage)) / 100000
+//    MaxPosMarginXBT := (round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+//    tradeactive := true
+//    Longtradeactive := true
+
+Longtradetrigger = if (longCondition and FIRELONG)
+    StopLevel := klower
+    EntryLevel := close
+    TPLevel := EntryLevel + (EntryLevel - StopLevel) * riskRewardRatio
+    BELevel := (EntryLevel - StopLevel) + EntryLevel
+    stopdistance := EntryLevel - StopLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+    PositionMarginXBT := (round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Longtradeactive := true 
+
+ 
+// Plot 0
+//plot(TradeSizeInUSD, title="TradeSizeInUSD", transp=100) // This will be the q=
+// Plot 1
+//plot(EntryLevel, title="EntryLevel", transp=100) // This will be the fp= after testing using market orders
+// Plot 2
+//plot(USDRiskPerTrade, title="USDRiskPerTrade", transp=100) // Shows risk per trade/loss. Multiply by Risk/Reward for Win estimates
+// Plot 3
+//plot(riskRewardRatio, title="riskRewardRatio", transp=100)
+ 
+plot(series=upper, title="UB", color=color.orange, linewidth=1)
+plot(series=lower, title="LB", color=color.orange, linewidth=1)
+plot(series=kupper, title="KU", color=color.white, linewidth=1)
+plot(series=klower, title="KU", color=color.white, linewidth=1)
+plot(series=basis, title="KB", color=color.white, linewidth=1)
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 
+// PLOT Entries
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+plotshape(Longtradetrigger, title="Squeeze long", style=shape.triangleup, location=location.belowbar, color=color.lime, text="LONG")
+plotshape(Shorttradetrigger, title="Squeeze short", style=shape.triangledown, location=location.abovebar, color=color.red, text="SHORT")
+//plotshape(show and longCondition[1], title="Lemon long confirmed", style=shape.cross, location=location.bottom, color=color.lime, text="alert", transp=100)
+//plotshape(show and shortCondition[1], title="Lemon short confirmed", style=shape.cross, location=location.top, color=color.red, text="alert", transp=100)
+ 
+ 
+if Shorttradeactive == true
+    Shorttradetrigger := false
+ 
+if Longtradeactive == true
+    Longtradetrigger := false
+ 
+ 
+// Plot Levels:
+pl1 = plot (StopLevel, title = "stoplevel", color=color.red)
+pl2 = plot (EntryLevel, title = "entrylevel", color=color.white)
+pl4 = plot (TPLevel, title = "TPlevel", color=color.green)
+ 
+fill(pl1, pl2, color=color.red, transp=65)
+fill(pl2, pl4, color=color.green, transp=65)
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Define and plot conflicting candles:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+   
+// Subtypes of conflicting bars:
+//-------------------------------------------------------------------------------------------------------
+ 
+// Bartype 3a is a candle which crosses both BELevel and EntryLevel and has its close above the midline between BELevel and EntryLevel (longs)
+// respecively has its close below the midline between BELevel and EntryLevel (shorts)
+// In case of a Bartype 3a the logic shall NOT consider a trade as closed as break-even, but shall assume trade continuation with activated break-even-flag.
+//-------------------------------------------------------------------------------------------------------
+ 
+//Bartype3_a_long = high > BELevel and high < TPLevel and low < EntryLevel and low > StopLevel and close > ((BELevel + EntryLevel)/2) and Longtradeactive
+//Bartype3_a_short = high > EntryLevel and high  < StopLevel and low < BELevel and low > TPLevel and close < ((BELevel + EntryLevel)/2) and Shorttradeactive
+//barcolor(Bartype3_a_long or Bartype3_a_short? color.purple : na)
+ 
+//Bartype3_a_Counter = 0    
+//Bartype3_a_Counter := nz(Bartype3_a_Counter[1])
+//if Bartype3_a_long or Bartype3_a_short
+//    Bartype3_a_Counter := Bartype3_a_Counter + 1
+ 
+// Bartype 4a is a candle which crosses TPLevel, BELevel and EntryLevel and has its close above BELevel (longs) respectively close below BELevel (shorts)
+// In case of a Bartype 4a the logic shall consider a trade as closed winner and shall not assume trade as closed break-even.
+//-------------------------------------------------------------------------------------------------------
+ 
+//Bartype4_a_long = high > TPLevel and low < EntryLevel and low > StopLevel and close > BELevel and Longtradeactive
+//Bartype4_a_short = high > EntryLevel and high < StopLevel and low < TPLevel and close < BELevel and Shorttradeactive
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade resolution:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+// Target adjustment
+shorttpadjust = if((Shorttradeactive == true) and kupper < TPLevel)
+    y = 1
+
+if shorttpadjust == true
+    TPLevel := kupper
+
+longtpadjust = if((Longtradeactive == true) and klower > TPLevel)
+    r = 1
+
+if longtpadjust == true
+    TPLevel := klower
+
+// Stop Adjustment
+
+shortstopleveladjust = if((Shorttradeactive == true) and (kupper < kupper[1]))
+    y = 1
+
+if shortstopleveladjust == true
+    StopLevel := kupper
+
+longstopleveladjust = if((Longtradeactive == true) and (klower > klower[1]))
+    r = 1
+
+if longstopleveladjust == true
+    StopLevel := klower
+
+// loss trades
+//-------------------------------------------------------------------------------------------------------
+ 
+PlotLossCounter = 0
+LossShort = 0
+LossLong = 0
+ 
+PlotLossCounter := nz(PlotLossCounter[1])
+LossShort := nz(LossShort[1])
+LossLong := nz(LossLong[1])
+ 
+plotlosshort = if ((Shorttradeactive == true) and (high > StopLevel) and (StopLevel > EntryLevel))
+    y = 1 // only required to make code work
+ 
+plotchar(plotlosshort, char="X", location=location.abovebar, color=color.red, transp=0, offset=0, size=size.small)
+ 
+if plotlosshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    LossShort := LossShort +1
+ 
+   
+//plotlosshort := false
+ 
+plotlosslong = if ((Longtradeactive == true) and (low < StopLevel) and (StopLevel < EntryLevel))
+    r = 1 // only required to make code work
+   
+plotchar(plotlosslong, char="X", location=location.belowbar, color=color.red, transp=0, offset=0, size=size.small)
+ 
+if plotlosslong == true
+    tradeactive := false
+    Longtradeactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    LossLong := LossLong + 1
+   
+
+ 
+// Win trades
+//-------------------------------------------------------------------------------------------------------
+PlotWinCounter = 0
+PlotWinCounter := nz(PlotWinCounter[1])
+WinLong = 0
+WinLong := nz(WinLong[1])
+WinShort = 0
+WinShort := nz(WinShort[1])
+ 
+plotWinshort = if (((Shorttradeactive ==  true) and (low < TPLevel)) or (((Shorttradeactive == true) and (high > StopLevel) and (StopLevel < EntryLevel))))
+    n = 1  // only required to make code work
+ 
+plotchar(plotWinshort, char="✓", location=location.belowbar, color=color.green, transp=0, offset=0, size=size.small)
+ 
+if plotWinshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    WinShort := WinShort +1
+   
+//plotWinshort := false
+ 
+plotWinlong = if (((Longtradeactive ==  true) and (high > TPLevel)) or ((Longtradeactive == true) and (low < StopLevel) and (StopLevel > EntryLevel)))
+    l = 1 // only required to make code work
+ 
+plotchar(plotWinlong, char="✓", location=location.abovebar, color=color.green, transp=0, offset=0, size=size.small)
+ 
+if plotWinlong == true
+    tradeactive := false
+    Longtradeactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    WinLong := WinLong +1
+   
+//plotWinlong := false
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade closing signals
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+// c=position e=bitmex-testnet t=market ro=1
+// Original Code Below
+// alertcondition(plotlosshort or plotlosslong or plotBreakevenshort or plotBreakevenlong, title='Lemon Close Trade BE or Stop', message='Lemon Close at BE or Stop')
+// alertcondition(plotWinshort or plotWinlong, title='Lemon Close Trade Win', message='Lemon Win')
+ 
+alertcondition(plotlosshort or plotlosslong, title='Lemon Close Trade', message="{{ticker}} Close")
+alertcondition(plotWinshort or plotWinlong, title='Lemon Trade Win', message="{{ticker}} Take Profit")
+ 
+EquityCurve = PlotWinCounter * 2 * USDRiskPerTrade - PlotLossCounter * USDRiskPerTrade - (PlotWinCounter + PlotLossCounter) * commission
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Statistics
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+winpercent = round((PlotWinCounter/(PlotWinCounter+PlotLossCounter)*100))
+losspercent = round((PlotLossCounter/(PlotWinCounter+PlotLossCounter)*100))
+rrpercent = round((PlotWinCounter/(PlotWinCounter+PlotLossCounter))*100)
+ 
+if (plotWinlong or plotWinshort or plotlosslong or plotlosshort) and not HideStatistics
+    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + tostring(PlotWinCounter) + " ("+ tostring(winpercent)+"%)"
+      + "\nLoss : " + tostring(PlotLossCounter) +" ("+tostring(losspercent)+"%)" + "\nRate : " + tostring (rrpercent)+"%)",color = color.white, textcolor=color.white)
+      
+// The following line is in order to print the equity curve:
+//-------------------------------------------------------------------------------------------------------
+ 
+plot (DisplayEquityCurve == true ? EquityCurve : na, title = "Profit and Loss", color=color.yellow, linewidth=3, style=plot.style_line)

@@ -1,0 +1,408 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// SCDTM (Stone Cold DA MAN) Strategy - Production Implementation
+// Original concept: Brian Beamish (TRI)
+// Pine Script implementation: Daveatt & JoshuaMcGowan
+// Updated and optimized version
+
+//@version=5
+strategy(title="SCDTM Strategy", shorttitle="SCDTM", overlay=true, 
+         pyramiding=0, default_qty_value=100, precision=7, currency=currency.USD,
+         commission_value=0.2, commission_type=strategy.commission.percent, 
+         initial_capital=10000, max_bars_back=5000)
+
+// Input Parameters
+src = input.source(close, title="Strategy Source")
+n = input.int(title="Fractal Periods", defval=2, minval=2)
+fractalBars = input.string(title="Fractal Type", defval="5", options=["3", "5"])
+
+// Risk Management Inputs
+rr = input.float(defval=2.25, minval=1.0, title="Risk to Reward Ratio")
+USDRiskPerTrade = input.int(defval=50, title="USD Risk Per Trade", minval=1)
+usePercentRisk = input.bool(defval=false, title="Use Percent Risk Instead")
+percentRisk = input.float(defval=1.0, minval=0.1, maxval=10.0, title="Risk Percent of Capital")
+
+// Bollinger Band %B Inputs
+length_bbr = input.int(20, minval=1, title="BB% Length")
+mult_bbr = input.float(2.0, minval=0.001, maxval=50, title="BB% Std Dev")
+upper_thresh = input.float(1.00, minval=0.001, maxval=2, title="BB% Upper Threshold")
+lower_thresh = input.float(0.00, minval=0.001, maxval=2, title="BB% Lower Threshold")
+
+// Stochastic RSI Inputs
+smoothK = input.int(3, minval=1, title="Stoch RSI %K Smooth")
+smoothD = input.int(3, minval=1, title="Stoch RSI %D Smooth")
+lengthRSI = input.int(14, minval=1, title="RSI Length")
+lengthStoch = input.int(14, minval=1, title="Stochastic Length")
+
+// Backtesting Period
+startDate = input.time(title="Start Date", defval=timestamp("01 Jan 2020 00:00"))
+endDate = input.time(title="End Date", defval=timestamp("31 Dec 2025 23:59"))
+inDateRange = time >= startDate and time <= endDate
+
+//==============================================================================
+// STATE MANAGEMENT
+//==============================================================================
+
+// Global state variables
+var int tradeState = 0  // 0=No trade, 1=Setup pending, 2=Long active, 3=Short active
+var int cp1 = 0, var int cp2 = 0, var int cp3 = 0, var int cp4 = 0, var int cp5 = 0
+
+// Trade level tracking
+var float bull_breakout_price = na, var float bull_fractal_sl = na
+var float bear_breakout_price = na, var float bear_fractal_sl = na
+var float fractal_dist = na, var float fractal_tgt = na
+var float entry_price = na
+
+// Position sizing
+var float positionSize = na
+var float riskAmount = na
+
+//==============================================================================
+// CHECKPOINT 1: Multi-Timeframe EMA Alignment
+//==============================================================================
+
+// EMA Calculations
+ema9 = ta.ema(src, 9)
+ema18 = ta.ema(src, 18)
+
+// Multi-timeframe EMA analysis
+ema9_D = request.security(syminfo.tickerid, 'D', ema9, lookahead=barmerge.lookahead_on)
+ema18_D = request.security(syminfo.tickerid, 'D', ema18, lookahead=barmerge.lookahead_on)
+
+ema9_H4 = request.security(syminfo.tickerid, '240', ema9, lookahead=barmerge.lookahead_on)
+ema18_H4 = request.security(syminfo.tickerid, '240', ema18, lookahead=barmerge.lookahead_on)
+
+ema9_H1 = request.security(syminfo.tickerid, '60', ema9, lookahead=barmerge.lookahead_on)
+ema18_H1 = request.security(syminfo.tickerid, '60', ema18, lookahead=barmerge.lookahead_on)
+
+// Individual timeframe bias
+bull_ema_daily = ema9_D >= ema18_D ? 1 : 0
+bear_ema_daily = ema9_D < ema18_D ? 1 : 0
+
+bull_ema_H4 = ema9_H4 >= ema18_H4 ? 1 : 0
+bear_ema_H4 = ema9_H4 < ema18_H4 ? 1 : 0
+
+bull_ema_H1 = ema9_H1 >= ema18_H1 ? 1 : 0
+bear_ema_H1 = ema9_H1 < ema18_H1 ? 1 : 0
+
+// Consolidated EMA alignment
+bull_ema_index = bull_ema_daily + bull_ema_H4 + bull_ema_H1
+bear_ema_index = bear_ema_daily + bear_ema_H4 + bear_ema_H1
+
+// Checkpoint 1 validation
+if (bull_ema_index == 3) or (bear_ema_index == 3)
+    cp1 := 1
+else
+    cp1 := 0
+
+//==============================================================================
+// CHECKPOINT 2: Bollinger Band %B and Stochastic RSI
+//==============================================================================
+
+// Bollinger Band %B calculation
+basis_bbr = ta.sma(src, length_bbr)
+dev_bbr = mult_bbr * ta.stdev(src, length_bbr)
+upper_bbr = basis_bbr + dev_bbr
+lower_bbr = basis_bbr - dev_bbr
+bbr = (src - lower_bbr) / (upper_bbr - lower_bbr)
+
+// %B signal tracking with persistence
+var long_bbr = 0
+var short_bbr = 0
+
+if bbr <= lower_thresh
+    long_bbr := 1
+if bbr >= 0.55 and long_bbr == 1
+    long_bbr := 0
+
+if bbr >= upper_thresh
+    short_bbr := 1
+if bbr <= 0.45 and short_bbr == 1
+    short_bbr := 0
+
+// Stochastic RSI calculation
+rsi1 = ta.rsi(src, lengthRSI)
+k = ta.sma(ta.stoch(rsi1, rsi1, rsi1, lengthStoch), smoothK)
+d = ta.sma(k, smoothD)
+
+// Stochastic RSI signals
+var long_rsi = 0
+var short_rsi = 0
+
+if k >= d
+    long_rsi := 1
+else
+    long_rsi := 0
+
+if d >= k
+    short_rsi := 1
+else
+    short_rsi := 0
+
+// Checkpoint 2 validation
+if ((bear_ema_index == 3) and (short_bbr == 1) and (short_rsi == 1)) or 
+   ((bull_ema_index == 3) and (long_bbr == 1) and (long_rsi == 1))
+    cp2 := 1
+else
+    cp2 := 0
+
+//==============================================================================
+// CHECKPOINT 3: Fractal Pattern Recognition
+//==============================================================================
+
+// Fractal detection logic
+dnFractal = fractalBars == "5" ? 
+    (high[n-2] < high[n] and high[n-1] < high[n] and high[n+1] < high[n] and high[n+2] < high[n]) :
+    fractalBars == "3" ? 
+    (high[n-1] < high[n] and high[n+1] < high[n]) : false
+
+upFractal = fractalBars == "5" ? 
+    (low[n-2] > low[n] and low[n-1] > low[n] and low[n+1] > low[n] and low[n+2] > low[n]) :
+    fractalBars == "3" ? 
+    (low[n-1] > low[n] and low[n+1] > low[n]) : false
+
+// Valid fractal conditions
+bull_fractal_valid = upFractal and (bull_ema_index == 3) and (tradeState == 0)
+bear_fractal_valid = dnFractal and (bear_ema_index == 3) and (tradeState == 0)
+
+// Checkpoint 3 validation
+if (cp2 == 1) and (bull_fractal_valid or bear_fractal_valid)
+    cp3 := 1
+    cp4 := 1  // Set persistent signal for breakout detection
+else
+    cp3 := 0
+
+//==============================================================================
+// CHECKPOINT 4: Breakout Level Calculation
+//==============================================================================
+
+// Calculate risk amount
+currentRiskAmount = usePercentRisk ? (strategy.equity * percentRisk / 100) : USDRiskPerTrade
+
+// Bull fractal setup levels
+if ta.change(cp4) and cp4 == 1 and bull_ema_index == 3
+    bull_fractal_sl := ta.valuewhen(upFractal, low[2], 0) - syminfo.mintick
+    bull_breakout_price := ta.valuewhen(upFractal, high, 0) + syminfo.mintick
+    
+    fractal_dist := bull_breakout_price - bull_fractal_sl
+    fractal_tgt := bull_breakout_price + (fractal_dist * rr)
+    entry_price := bull_breakout_price
+    
+    tradeState := 1  // Setup pending breakout
+    riskAmount := currentRiskAmount
+    positionSize := riskAmount / fractal_dist
+
+// Bear fractal setup levels
+if ta.change(cp4) and cp4 == 1 and bear_ema_index == 3
+    bear_fractal_sl := ta.valuewhen(dnFractal, high[2], 0) + syminfo.mintick
+    bear_breakout_price := ta.valuewhen(dnFractal, low, 0) - syminfo.mintick
+    
+    fractal_dist := bear_fractal_sl - bear_breakout_price
+    fractal_tgt := bear_breakout_price - (fractal_dist * rr)
+    entry_price := bear_breakout_price
+    
+    tradeState := 1  // Setup pending breakout
+    riskAmount := currentRiskAmount
+    positionSize := riskAmount / fractal_dist
+
+//==============================================================================
+// SETUP INVALIDATION
+//==============================================================================
+
+// Reset function
+resetSetup() =>
+    bull_fractal_sl := na
+    bear_fractal_sl := na
+    bull_breakout_price := na
+    bear_breakout_price := na
+    fractal_dist := na
+    fractal_tgt := na
+    entry_price := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    tradeState := 0
+
+// Bull setup invalidation
+if (low < bull_fractal_sl) and (tradeState == 1) and not na(bull_fractal_sl)
+    resetSetup()
+
+// Bear setup invalidation  
+if (high > bear_fractal_sl) and (tradeState == 1) and not na(bear_fractal_sl)
+    resetSetup()
+
+//==============================================================================
+// CHECKPOINT 5: Breakout Confirmation and Entry
+//==============================================================================
+
+// Bull breakout confirmation
+if cp4 == 1 and (high >= bull_breakout_price) and (bull_ema_index >= 2) and (tradeState == 1) and inDateRange
+    strategy.entry("Long", strategy.long, qty=positionSize, stop=bull_breakout_price)
+    tradeState := 2
+    cp5 := 1
+
+// Bear breakout confirmation
+if cp4 == 1 and (low <= bear_breakout_price) and (bear_ema_index >= 2) and (tradeState == 1) and inDateRange
+    strategy.entry("Short", strategy.short, qty=positionSize, stop=bear_breakout_price)
+    tradeState := 3
+    cp5 := 1
+
+//==============================================================================
+// TRADE MANAGEMENT
+//==============================================================================
+
+// Exit conditions for long trades
+if tradeState == 2
+    strategy.exit("Exit Long", "Long", stop=bull_fractal_sl, limit=fractal_tgt)
+    
+    // Check if trade was closed
+    if strategy.position_size == 0 and strategy.position_size[1] > 0
+        resetSetup()
+
+// Exit conditions for short trades
+if tradeState == 3
+    strategy.exit("Exit Short", "Short", stop=bear_fractal_sl, limit=fractal_tgt)
+    
+    // Check if trade was closed
+    if strategy.position_size == 0 and strategy.position_size[1] < 0
+        resetSetup()
+
+//==============================================================================
+// VISUAL COMPONENTS
+//==============================================================================
+
+// Fractal plots
+plotshape(bear_ema_index == 3 and cp2 and dnFractal, "Down Fractal", 
+          style=shape.triangledown, location=location.abovebar, 
+          size=size.tiny, offset=-2, color=color.red)
+
+plotshape(bull_ema_index == 3 and cp2 and upFractal, "Up Fractal", 
+          style=shape.triangleup, location=location.belowbar, 
+          size=size.tiny, offset=-2, color=color.green)
+
+// Entry signals
+plotshape(ta.change(cp5) and cp5 == 1 and bull_ema_index >= 2, title="Long Entry", 
+          color=color.green, textcolor=color.white, style=shape.triangleup, 
+          location=location.belowbar, size=size.normal, text="LONG")
+
+plotshape(ta.change(cp5) and cp5 == 1 and bear_ema_index >= 2, title="Short Entry", 
+          color=color.red, textcolor=color.white, style=shape.triangledown, 
+          location=location.abovebar, size=size.normal, text="SHORT")
+
+// Level plots
+plot(bull_fractal_sl, "Bull Stop Loss", color=color.red, linewidth=2, style=plot.style_circles)
+plot(bear_fractal_sl, "Bear Stop Loss", color=color.red, linewidth=2, style=plot.style_circles)
+plot(bull_breakout_price, "Bull Breakout", color=color.yellow, linewidth=2, style=plot.style_circles)
+plot(bear_breakout_price, "Bear Breakout", color=color.yellow, linewidth=2, style=plot.style_circles)
+plot(fractal_tgt, "Target", color=color.green, linewidth=2, style=plot.style_circles)
+
+// Trend background
+bgcolor(bull_ema_index == 3 ? color.new(color.green, 95) : 
+        bear_ema_index == 3 ? color.new(color.red, 95) : na)
+
+//==============================================================================
+// PERFORMANCE METRICS
+//==============================================================================
+
+// Calculate performance metrics
+var int totalTrades = 0
+var int winningTrades = 0
+var float totalProfit = 0.0
+var float totalLoss = 0.0
+
+if strategy.closedtrades > strategy.closedtrades[1]
+    totalTrades := strategy.closedtrades
+    if strategy.closedtrades.profit(strategy.closedtrades - 1) > 0
+        winningTrades := winningTrades + 1
+        totalProfit := totalProfit + strategy.closedtrades.profit(strategy.closedtrades - 1)
+    else
+        totalLoss := totalLoss + math.abs(strategy.closedtrades.profit(strategy.closedtrades - 1))
+
+winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0
+profitFactor = totalLoss > 0 ? totalProfit / totalLoss : 0
+avgWin = winningTrades > 0 ? totalProfit / winningTrades : 0
+avgLoss = (totalTrades - winningTrades) > 0 ? totalLoss / (totalTrades - winningTrades) : 0
+
+//==============================================================================
+// INFORMATION PANEL
+//==============================================================================
+
+var table infoTable = table.new(position.top_right, 2, 12, bgcolor=color.white, border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "SCDTM Strategy", text_color=color.black, text_size=size.normal, bgcolor=color.gray)
+    table.cell(infoTable, 1, 0, "Status", text_color=color.black, text_size=size.normal, bgcolor=color.gray)
+    
+    table.cell(infoTable, 0, 1, "EMA Alignment", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 1, cp1 ? "✓" : "✗", 
+              text_color=cp1 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 2, "%B + Stoch RSI", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 2, cp2 ? "✓" : "✗", 
+              text_color=cp2 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 3, "Fractal Pattern", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 3, cp3 ? "✓" : "✗", 
+              text_color=cp3 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 4, "Trade State", text_color=color.black, text_size=size.small)
+    stateText = tradeState == 0 ? "No Trade" : 
+                tradeState == 1 ? "Setup" : 
+                tradeState == 2 ? "Long" : "Short"
+    table.cell(infoTable, 1, 4, stateText, text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 5, "Risk Amount", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 5, "$" + str.tostring(math.round(riskAmount, 2)), 
+              text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 6, "Position Size", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 6, str.tostring(math.round(positionSize, 4)), 
+              text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 7, "Total Trades", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 7, str.tostring(totalTrades), text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 8, "Win Rate", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 8, str.tostring(math.round(winRate, 1)) + "%", 
+              text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 9, "Profit Factor", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 9, str.tostring(math.round(profitFactor, 2)), 
+              text_color=color.black, text_size=size.small)
+    
+    table.cell(infoTable, 0, 10, "Avg Win", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 10, "$" + str.tostring(math.round(avgWin, 2)), 
+              text_color=color.green, text_size=size.small)
+    
+    table.cell(infoTable, 0, 11, "Avg Loss", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 11, "$" + str.tostring(math.round(avgLoss, 2)), 
+              text_color=color.red, text_size=size.small)
+
+//==============================================================================
+// ALERTS FOR AUTOVIEW INTEGRATION
+//==============================================================================
+
+// Entry alerts with position sizing
+longAlert = ta.change(cp5) and cp5 == 1 and bull_ema_index >= 2
+shortAlert = ta.change(cp5) and cp5 == 1 and bear_ema_index >= 2
+
+alertcondition(longAlert, title="SCDTM Long Entry", 
+               message="LONG {{ticker}} sl={{bull_fractal_sl}} tp={{fractal_tgt}} risk={{riskAmount}}")
+
+alertcondition(shortAlert, title="SCDTM Short Entry", 
+               message="SHORT {{ticker}} sl={{bear_fractal_sl}} tp={{fractal_tgt}} risk={{riskAmount}}")
+
+// Exit alerts
+alertcondition(strategy.position_size == 0 and strategy.position_size[1] != 0, title="SCDTM Position Closed", 
+               message="Position closed on {{ticker}} - P&L: {{strategy.netprofit}}")
+
+//==============================================================================
+// DEBUG PLOTS
+//==============================================================================
+
+plot(bull_ema_index, title="Bull EMA Index", display=display.data_window)
+plot(bear_ema_index, title="Bear EMA Index", display=display.data_window)
+plot(tradeState, title="Trade State", display=display.data_window)
+plot(bbr, title="BB%", display=display.data_window)
+plot(k, title="Stoch RSI %K", display=display.data_window)
+plot(d, title="Stoch RSI %D", display=display.data_window)

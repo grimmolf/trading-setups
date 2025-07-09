@@ -1,0 +1,577 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © trading-setups
+
+//@version=5
+strategy(title="Reload Ranger Strategy", shorttitle="Reload Ranger Strategy", overlay=true,
+         default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+         commission_type=strategy.commission.percent, commission_value=0.1,
+         slippage=2, process_orders_on_close=false, max_bars_back=500)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// INPUT PARAMETERS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Timeframe settings
+higher_timeframe = input.timeframe("15m", "Higher Timeframe for RLZ", group="Timeframes")
+
+// Fibonacci retracement settings
+fib_min = input.float(61.8, "Minimum Fib Retracement %", minval=50.0, maxval=90.0, group="Fibonacci Levels")
+fib_max = input.float(78.6, "Maximum Fib Retracement %", minval=50.0, maxval=90.0, group="Fibonacci Levels")
+sweet_spot = input.float(70.2, "Sweet Spot Level %", minval=50.0, maxval=90.0, group="Fibonacci Levels")
+
+// Pattern recognition settings
+pattern_range = input.int(7, "Pattern Width (bars)", minval=5, maxval=20, group="Pattern Recognition")
+pattern_offset = input.int(2, "Pattern Offset (bars)", minval=0, maxval=10, group="Pattern Recognition")
+strict_patterns = input.bool(true, "Strict Pattern Matching", group="Pattern Recognition")
+
+// Momentum indicator settings
+williams_period = input.int(14, "Williams %R Period", minval=5, maxval=50, group="Momentum Indicators")
+macd_fast = input.int(12, "MACD Fast Period", minval=5, maxval=50, group="Momentum Indicators")
+macd_slow = input.int(26, "MACD Slow Period", minval=10, maxval=100, group="Momentum Indicators")
+macd_signal = input.int(9, "MACD Signal Period", minval=5, maxval=25, group="Momentum Indicators")
+rsi_period = input.int(14, "RSI Period", minval=5, maxval=50, group="Momentum Indicators")
+obv_ema_period = input.int(20, "OBV EMA Period", minval=5, maxval=50, group="Momentum Indicators")
+
+// Risk management
+base_risk = input.float(2.0, "Base Risk % per Trade", minval=0.5, maxval=10.0, group="Risk Management")
+risk_increment = input.float(1.0, "Risk Increment %", minval=0.5, maxval=2.0, group="Risk Management")
+max_risk = input.float(5.0, "Maximum Risk % per Trade", minval=1.0, maxval=10.0, group="Risk Management")
+
+// Stop management settings
+enable_stop_management = input.bool(true, "Enable Progressive Stop Management", group="Stop Management")
+stop_25_percent = input.bool(true, "Move to 25% at 50% Progress", group="Stop Management")
+trailing_stop_66 = input.bool(true, "Trail Stop at 66% Progress", group="Stop Management")
+trailing_bars = input.int(3, "Trailing Stop Bars", minval=1, maxval=10, group="Stop Management")
+
+// Strategy settings
+allow_long = input.bool(true, "Allow Long Positions", group="Strategy Settings")
+allow_short = input.bool(true, "Allow Short Positions", group="Strategy Settings")
+max_positions = input.int(1, "Maximum Concurrent Positions", minval=1, maxval=3, group="Strategy Settings")
+
+// Visual settings
+show_patterns = input.bool(true, "Show Pattern Levels", group="Display")
+show_fib_levels = input.bool(true, "Show Fibonacci Levels", group="Display")
+show_entries = input.bool(true, "Show Entry Signals", group="Display")
+show_stops_targets = input.bool(true, "Show Stops and Targets", group="Display")
+show_info_table = input.bool(true, "Show Performance Table", group="Display")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// HIGHER TIMEFRAME ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Get higher timeframe data
+htf_high = request.security(syminfo.tickerid, higher_timeframe, high)
+htf_low = request.security(syminfo.tickerid, higher_timeframe, low)
+htf_close = request.security(syminfo.tickerid, higher_timeframe, close)
+
+// Calculate recent swing highs and lows
+swing_high = ta.highest(htf_high, 20)
+swing_low = ta.lowest(htf_low, 20)
+
+// Determine trend direction
+trend_direction = htf_close > htf_close[10] ? 1 : htf_close < htf_close[10] ? -1 : 0
+
+// Calculate Fibonacci levels
+move_size = swing_high - swing_low
+fib_61_8 = trend_direction == -1 ? swing_low + (move_size * fib_min / 100) : swing_high - (move_size * fib_min / 100)
+fib_78_6 = trend_direction == -1 ? swing_low + (move_size * fib_max / 100) : swing_high - (move_size * fib_max / 100)
+fib_sweet = trend_direction == -1 ? swing_low + (move_size * sweet_spot / 100) : swing_high - (move_size * sweet_spot / 100)
+
+// Location confirmation
+location_confirmed = trend_direction == -1 ? (close >= fib_61_8 and close <= fib_78_6) : (close <= fib_61_8 and close >= fib_78_6)
+below_sweet_spot = trend_direction == -1 ? close < fib_sweet : close > fib_sweet
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PATTERN RECOGNITION (ADAPTED FROM DAV-O)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// W Pattern Detection Function (Double Bottom)
+detect_w_pattern(series, range_bars, offset_bars, strict) =>
+    var int point_a = na, var int point_b = na, var int point_c = na, var int point_d = na, var int point_e = 0
+    var float value_a = na, var float value_b = na, var float value_c = na, var float value_d = na, var float value_e = na
+    found = false
+    
+    for offset = 0 to offset_bars
+        if found
+            break
+        
+        point_a := na, point_b := na, point_c := na, point_d := na, point_e := 0
+        value_a := series, value_b := series, value_c := series, value_d := series, value_e := series
+        
+        for i = 1 to range_bars - 1
+            // Find point D (first low after current)
+            if na(value_d) and series[i + offset] < series[i + offset - 1]
+                point_d := i + offset
+                value_d := series[i + offset]
+                continue
+            if na(point_d)
+                break
+            
+            // Find point C (high after D)
+            if na(value_c) and series[i + offset] > series[i + offset - 1]
+                point_c := i + offset
+                value_c := series[i + offset]
+                continue
+            if na(point_c)
+                break
+            
+            // Find point B (low after C)
+            if na(value_b) and series[i + offset] < series[i + offset - 1]
+                point_b := i + offset
+                value_b := series[i + offset]
+                continue
+            if na(point_b)
+                break
+            
+            // Find point A (high after B)
+            if na(value_a) and series[i + offset] > series[i + offset - 1]
+                point_a := i + offset
+                value_a := series[i + offset]
+                continue
+            if na(point_a)
+                break
+        
+        // W found if all points exist and follow W pattern rules
+        if not na(point_a) and not na(point_b) and not na(point_c) and not na(point_d)
+            w_rules = series > value_c and // E > C
+                     value_d < series and value_d < value_c and // D < E and D < C
+                     (value_b <= value_d or not strict) and value_b < value_a // B <= D (if strict) and B < A
+            found := w_rules
+    
+    [found, point_a, point_b, point_c, point_d, point_e]
+
+// M Pattern Detection Function (Double Top)
+detect_m_pattern(series, range_bars, offset_bars, strict) =>
+    var int point_a = na, var int point_b = na, var int point_c = na, var int point_d = na, var int point_e = 0
+    var float value_a = na, var float value_b = na, var float value_c = na, var float value_d = na, var float value_e = na
+    found = false
+    
+    for offset = 0 to offset_bars
+        if found
+            break
+        
+        point_a := na, point_b := na, point_c := na, point_d := na, point_e := 0
+        value_a := series, value_b := series, value_c := series, value_d := series, value_e := series
+        
+        for i = 1 to range_bars - 1
+            // Find point D (first high after current)
+            if na(value_d) and series[i + offset] > series[i + offset - 1]
+                point_d := i + offset
+                value_d := series[i + offset]
+                continue
+            if na(point_d)
+                break
+            
+            // Find point C (low after D)
+            if na(value_c) and series[i + offset] < series[i + offset - 1]
+                point_c := i + offset
+                value_c := series[i + offset]
+                continue
+            if na(point_c)
+                break
+            
+            // Find point B (high after C)
+            if na(value_b) and series[i + offset] > series[i + offset - 1]
+                point_b := i + offset
+                value_b := series[i + offset]
+                continue
+            if na(point_b)
+                break
+            
+            // Find point A (low after B)
+            if na(value_a) and series[i + offset] < series[i + offset - 1]
+                point_a := i + offset
+                value_a := series[i + offset]
+                continue
+            if na(point_a)
+                break
+        
+        // M found if all points exist and follow M pattern rules
+        if not na(point_a) and not na(point_b) and not na(point_c) and not na(point_d)
+            m_rules = series < value_c and // E < C
+                     value_d > series and value_d > value_c and // D > E and D > C
+                     (value_b >= value_d or not strict) and value_b > value_a // B >= D (if strict) and B > A
+            found := m_rules
+    
+    [found, point_a, point_b, point_c, point_d, point_e]
+
+// Head and Shoulders Detection (simplified)
+detect_head_shoulders(series, range_bars) =>
+    peaks = array.new<float>()
+    valleys = array.new<float>()
+    
+    // Find peaks and valleys
+    for i = 2 to range_bars - 2
+        if series[i] > series[i-1] and series[i] > series[i+1]
+            array.push(peaks, series[i])
+        if series[i] < series[i-1] and series[i] < series[i+1]
+            array.push(valleys, series[i])
+    
+    // Check for H&S pattern (3 peaks with middle one highest)
+    hs_found = false
+    if array.size(peaks) >= 3
+        peak1 = array.get(peaks, 0)
+        peak2 = array.get(peaks, 1) // Head
+        peak3 = array.get(peaks, 2)
+        
+        // Head higher than shoulders, shoulders roughly equal
+        if peak2 > peak1 and peak2 > peak3 and math.abs(peak1 - peak3) / peak1 < 0.02
+            hs_found := true
+    
+    hs_found
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// MOMENTUM INDICATORS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Williams %R
+williams_r = -100 * (ta.highest(high, williams_period) - close) / (ta.highest(high, williams_period) - ta.lowest(low, williams_period))
+williams_ema = ta.ema(williams_r, 14)
+
+// MACD
+[macd_line, macd_signal_line, macd_histogram] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// RSI
+rsi = ta.rsi(close, rsi_period)
+
+// OBV
+obv = ta.obv
+obv_ema = ta.ema(obv, obv_ema_period)
+
+// Volume Impetus (3 successive bars)
+volume_impetus_bull = volume > volume[1] and volume[1] > volume[2] and 
+                      close > close[1] and close[1] > close[2]
+volume_impetus_bear = volume > volume[1] and volume[1] > volume[2] and 
+                      close < close[1] and close[1] < close[2]
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// MOMENTUM CONFIRMATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Williams %R confirmation
+williams_confirmed_bull = williams_r < -80 and ta.crossover(williams_r, williams_ema)
+williams_confirmed_bear = williams_r > -20 and ta.crossunder(williams_r, williams_ema)
+
+// MACD confirmation (looking for double bottom/top in MACD)
+[macd_w_found, , , , , ] = detect_w_pattern(macd_line, pattern_range, pattern_offset, strict_patterns)
+[macd_m_found, , , , , ] = detect_m_pattern(macd_line, pattern_range, pattern_offset, strict_patterns)
+
+// RSI confirmation
+rsi_confirmed_bull = rsi < 30 // Oversold
+rsi_confirmed_bear = rsi > 70 // Overbought
+
+// OBV confirmation
+obv_confirmed_bull = ta.crossover(obv, obv_ema) and volume_impetus_bull
+obv_confirmed_bear = ta.crossunder(obv, obv_ema) and volume_impetus_bear
+
+// Count momentum confirmations
+momentum_count_bull = (williams_confirmed_bull ? 1 : 0) + (macd_w_found ? 1 : 0) + (rsi_confirmed_bull ? 1 : 0) + (obv_confirmed_bull ? 1 : 0)
+momentum_count_bear = (williams_confirmed_bear ? 1 : 0) + (macd_m_found ? 1 : 0) + (rsi_confirmed_bear ? 1 : 0) + (obv_confirmed_bear ? 1 : 0)
+
+momentum_confirmed_bull = momentum_count_bull >= 2
+momentum_confirmed_bear = momentum_count_bear >= 2
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PRICE STRUCTURE ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Detect price patterns
+[price_w_found, , , , , ] = detect_w_pattern(close, pattern_range, pattern_offset, strict_patterns)
+[price_m_found, , , , , ] = detect_m_pattern(close, pattern_range, pattern_offset, strict_patterns)
+hs_found = detect_head_shoulders(close, pattern_range)
+
+// Structure confirmation
+structure_confirmed_bull = price_w_found
+structure_confirmed_bear = price_m_found or hs_found
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// RISK CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate dynamic risk
+additional_risk_bull = (below_sweet_spot and trend_direction == -1 ? risk_increment : 0) + 
+                      (hs_found ? risk_increment : 0) + 
+                      (momentum_count_bull > 3 ? risk_increment : 0)
+
+additional_risk_bear = (below_sweet_spot and trend_direction == 1 ? risk_increment : 0) + 
+                      (hs_found ? risk_increment : 0) + 
+                      (momentum_count_bear > 3 ? risk_increment : 0)
+
+current_risk_bull = math.min(base_risk + additional_risk_bull, max_risk)
+current_risk_bear = math.min(base_risk + additional_risk_bear, max_risk)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// COMPLETE SETUP VALIDATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Bullish Reload Ranger Setup
+bullish_setup = trend_direction == -1 and                    // Bearish higher timeframe trend
+                location_confirmed and                       // In Fibonacci retracement zone
+                structure_confirmed_bull and                 // W pattern in price
+                momentum_confirmed_bull and                  // At least 2 momentum confirmations
+                allow_long and                               // Long positions allowed
+                strategy.position_size == 0                  // No current position
+
+// Bearish Reload Ranger Setup
+bearish_setup = trend_direction == 1 and                     // Bullish higher timeframe trend
+                location_confirmed and                       // In Fibonacci retracement zone
+                structure_confirmed_bear and                 // M or H&S pattern in price
+                momentum_confirmed_bear and                  // At least 2 momentum confirmations
+                allow_short and                              // Short positions allowed
+                strategy.position_size == 0                  // No current position
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PROFIT TARGET AND STOP LOSS CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate 50% retracement target
+latest_high = ta.highest(high, 50)
+latest_low = ta.lowest(low, 50)
+
+profit_target_bull = latest_low + ((latest_high - latest_low) * 0.5)
+profit_target_bear = latest_high - ((latest_high - latest_low) * 0.5)
+
+// Calculate stop loss
+stop_loss_bull = ta.lowest(low, 20) - (ta.atr(14) * 0.5)
+stop_loss_bear = ta.highest(high, 20) + (ta.atr(14) * 0.5)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// POSITION SIZING
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate position size based on risk
+calculate_position_size(entry_price, stop_price, risk_percent) =>
+    account_value = strategy.equity
+    risk_amount = account_value * (risk_percent / 100)
+    stop_distance = math.abs(entry_price - stop_price)
+    
+    if stop_distance > 0
+        position_size = risk_amount / stop_distance
+        // Limit position size to account value
+        math.min(position_size, account_value * 0.95)
+    else
+        0
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// STRATEGY EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Long entry
+if bullish_setup
+    qty = calculate_position_size(close, stop_loss_bull, current_risk_bull)
+    strategy.entry("Long", strategy.long, qty=qty, comment="RR Long Entry")
+
+// Short entry
+if bearish_setup
+    qty = calculate_position_size(close, stop_loss_bear, current_risk_bear)
+    strategy.entry("Short", strategy.short, qty=qty, comment="RR Short Entry")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// POSITION MANAGEMENT VARIABLES
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Track position details
+var float entry_price = na
+var float initial_stop = na
+var float target_price = na
+var float range_size = na
+var bool stop_moved_25 = false
+var bool trailing_active = false
+
+// Update position details on entry
+if strategy.position_size > 0 and strategy.position_size[1] == 0
+    entry_price := close
+    initial_stop := stop_loss_bull
+    target_price := profit_target_bull
+    range_size := target_price - initial_stop
+    stop_moved_25 := false
+    trailing_active := false
+
+if strategy.position_size < 0 and strategy.position_size[1] == 0
+    entry_price := close
+    initial_stop := stop_loss_bear
+    target_price := profit_target_bear
+    range_size := initial_stop - target_price
+    stop_moved_25 := false
+    trailing_active := false
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PROGRESSIVE STOP MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate progress toward target
+progress_percent = 0.0
+if strategy.position_size > 0 and not na(range_size) and range_size > 0
+    current_progress = close - initial_stop
+    progress_percent := current_progress / range_size
+
+if strategy.position_size < 0 and not na(range_size) and range_size > 0
+    current_progress = initial_stop - close
+    progress_percent := current_progress / range_size
+
+// Move stop to 25% level at 50% progress
+if enable_stop_management and stop_25_percent and progress_percent >= 0.5 and not stop_moved_25
+    if strategy.position_size > 0
+        new_stop = initial_stop + (range_size * 0.25)
+        strategy.exit("Long Stop 25%", "Long", stop=new_stop, comment="25% Stop")
+        stop_moved_25 := true
+    
+    if strategy.position_size < 0
+        new_stop = initial_stop - (range_size * 0.25)
+        strategy.exit("Short Stop 25%", "Short", stop=new_stop, comment="25% Stop")
+        stop_moved_25 := true
+
+// Trail stop 3 bars behind at 66% progress
+if enable_stop_management and trailing_stop_66 and progress_percent >= 0.66 and not trailing_active
+    if strategy.position_size > 0
+        trailing_stop = ta.lowest(low, trailing_bars) - (ta.atr(14) * 0.5)
+        strategy.exit("Long Trail", "Long", trail_price=close, trail_offset=close-trailing_stop, comment="Trailing Stop")
+        trailing_active := true
+    
+    if strategy.position_size < 0
+        trailing_stop = ta.highest(high, trailing_bars) + (ta.atr(14) * 0.5)
+        strategy.exit("Short Trail", "Short", trail_price=close, trail_offset=trailing_stop-close, comment="Trailing Stop")
+        trailing_active := true
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// EXIT CONDITIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Standard exits (if progressive stop management is disabled)
+if not enable_stop_management
+    // Long exits
+    if strategy.position_size > 0
+        strategy.exit("Long Exit", "Long", stop=stop_loss_bull, limit=profit_target_bull, comment="Long Exit")
+    
+    // Short exits
+    if strategy.position_size < 0
+        strategy.exit("Short Exit", "Short", stop=stop_loss_bear, limit=profit_target_bear, comment="Short Exit")
+
+// Trade invalidation (break of recent highs/lows)
+if strategy.position_size > 0
+    recent_low = ta.lowest(low, 20)
+    if close < recent_low
+        strategy.close("Long", comment="Long Invalidated")
+
+if strategy.position_size < 0
+    recent_high = ta.highest(high, 20)
+    if close > recent_high
+        strategy.close("Short", comment="Short Invalidated")
+
+// Reset position variables when position closes
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    entry_price := na
+    initial_stop := na
+    target_price := na
+    range_size := na
+    stop_moved_25 := false
+    trailing_active := false
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// VISUAL ELEMENTS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Plot Fibonacci levels
+plot(show_fib_levels ? fib_61_8 : na, "Fib 61.8%", color.yellow, 1, plot.style_line)
+plot(show_fib_levels ? fib_78_6 : na, "Fib 78.6%", color.orange, 1, plot.style_line)
+plot(show_fib_levels ? fib_sweet : na, "Sweet Spot", color.blue, 2, plot.style_line)
+
+// Plot entry signals
+plotshape(show_entries and bullish_setup, "Bullish Entry", shape.triangleup, location.belowbar, color.lime, size=size.normal, text="RR↑")
+plotshape(show_entries and bearish_setup, "Bearish Entry", shape.triangledown, location.abovebar, color.red, size=size.normal, text="RR↓")
+
+// Plot stops and targets for active positions
+plot(show_stops_targets and strategy.position_size > 0 ? stop_loss_bull : na, "Long Stop", color.red, 2, plot.style_line)
+plot(show_stops_targets and strategy.position_size > 0 ? profit_target_bull : na, "Long Target", color.green, 2, plot.style_line)
+plot(show_stops_targets and strategy.position_size < 0 ? stop_loss_bear : na, "Short Stop", color.red, 2, plot.style_line)
+plot(show_stops_targets and strategy.position_size < 0 ? profit_target_bear : na, "Short Target", color.green, 2, plot.style_line)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PERFORMANCE TABLE
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+if show_info_table and barstate.islast
+    var table perf_table = table.new(position.top_right, 2, 15, bgcolor=color.white, border_width=1)
+    
+    table.cell(perf_table, 0, 0, "Reload Ranger Strategy", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 0, "", text_color=color.black, text_size=size.small)
+    
+    // Current position
+    pos_size = strategy.position_size
+    pos_text = pos_size > 0 ? "LONG" : pos_size < 0 ? "SHORT" : "FLAT"
+    pos_color = pos_size > 0 ? color.green : pos_size < 0 ? color.red : color.gray
+    table.cell(perf_table, 0, 1, "Position", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 1, pos_text, text_color=pos_color, text_size=size.small)
+    
+    // Setup components status
+    table.cell(perf_table, 0, 2, "HTF Trend", text_color=color.black, text_size=size.small)
+    trend_text = trend_direction == 1 ? "BULL" : trend_direction == -1 ? "BEAR" : "SIDE"
+    trend_color = trend_direction == 1 ? color.green : trend_direction == -1 ? color.red : color.gray
+    table.cell(perf_table, 1, 2, trend_text, text_color=trend_color, text_size=size.small)
+    
+    table.cell(perf_table, 0, 3, "Location", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 3, location_confirmed ? "✓" : "✗", 
+               text_color=location_confirmed ? color.green : color.red, text_size=size.small)
+    
+    table.cell(perf_table, 0, 4, "Bull Structure", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 4, structure_confirmed_bull ? "✓" : "✗", 
+               text_color=structure_confirmed_bull ? color.green : color.red, text_size=size.small)
+    
+    table.cell(perf_table, 0, 5, "Bear Structure", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 5, structure_confirmed_bear ? "✓" : "✗", 
+               text_color=structure_confirmed_bear ? color.green : color.red, text_size=size.small)
+    
+    table.cell(perf_table, 0, 6, "Bull Momentum", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 6, str.tostring(momentum_count_bull) + "/4", 
+               text_color=momentum_confirmed_bull ? color.green : color.red, text_size=size.small)
+    
+    table.cell(perf_table, 0, 7, "Bear Momentum", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 7, str.tostring(momentum_count_bear) + "/4", 
+               text_color=momentum_confirmed_bear ? color.green : color.red, text_size=size.small)
+    
+    // Risk levels
+    table.cell(perf_table, 0, 8, "Bull Risk", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 8, str.tostring(current_risk_bull, "#.#") + "%", text_color=color.blue, text_size=size.small)
+    
+    table.cell(perf_table, 0, 9, "Bear Risk", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 9, str.tostring(current_risk_bear, "#.#") + "%", text_color=color.blue, text_size=size.small)
+    
+    // Performance metrics
+    table.cell(perf_table, 0, 10, "Total Trades", text_color=color.black, text_size=size.small)
+    table.cell(perf_table, 1, 10, str.tostring(strategy.closedtrades, "#"), text_color=color.black, text_size=size.small)
+    
+    table.cell(perf_table, 0, 11, "Win Rate", text_color=color.black, text_size=size.small)
+    win_rate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100 : 0
+    table.cell(perf_table, 1, 11, str.tostring(win_rate, "#.#") + "%", text_color=color.black, text_size=size.small)
+    
+    table.cell(perf_table, 0, 12, "Profit Factor", text_color=color.black, text_size=size.small)
+    pf_text = strategy.grossloss != 0 ? str.tostring(strategy.grossprofit / math.abs(strategy.grossloss), "#.##") : "N/A"
+    table.cell(perf_table, 1, 12, pf_text, text_color=color.black, text_size=size.small)
+    
+    table.cell(perf_table, 0, 13, "Net Profit", text_color=color.black, text_size=size.small)
+    net_profit_color = strategy.netprofit > 0 ? color.green : strategy.netprofit < 0 ? color.red : color.gray
+    table.cell(perf_table, 1, 13, str.tostring(strategy.netprofit, "#.##"), text_color=net_profit_color, text_size=size.small)
+    
+    table.cell(perf_table, 0, 14, "Progress", text_color=color.black, text_size=size.small)
+    progress_text = strategy.position_size != 0 ? str.tostring(progress_percent * 100, "#") + "%" : "N/A"
+    table.cell(perf_table, 1, 14, progress_text, text_color=color.purple, text_size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// TRADE LABELS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Entry labels
+if strategy.position_size > 0 and strategy.position_size[1] == 0
+    label.new(bar_index, low, "LONG ENTRY\nRisk: " + str.tostring(current_risk_bull, "#.#") + "%\nStop: " + str.tostring(stop_loss_bull, "#.##") + "\nTarget: " + str.tostring(profit_target_bull, "#.##"), 
+              color=color.green, style=label.style_label_up, size=size.small)
+
+if strategy.position_size < 0 and strategy.position_size[1] == 0
+    label.new(bar_index, high, "SHORT ENTRY\nRisk: " + str.tostring(current_risk_bear, "#.#") + "%\nStop: " + str.tostring(stop_loss_bear, "#.##") + "\nTarget: " + str.tostring(profit_target_bear, "#.##"), 
+              color=color.red, style=label.style_label_down, size=size.small)
+
+// Exit labels
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    exit_pnl = strategy.position_size[1] > 0 ? close - entry_price : entry_price - close
+    exit_color = exit_pnl > 0 ? color.green : color.red
+    label.new(bar_index, close, "EXIT\nP&L: " + str.tostring(exit_pnl, "#.##") + "\nPrice: " + str.tostring(close, "#.##"), 
+              color=exit_color, style=label.style_label_left, size=size.small)

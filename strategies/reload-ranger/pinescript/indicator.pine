@@ -1,0 +1,409 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © trading-setups
+
+//@version=5
+indicator(title="Reload Ranger Indicator", shorttitle="Reload Ranger", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// INPUT PARAMETERS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Timeframe settings
+higher_timeframe = input.timeframe("15m", "Higher Timeframe for RLZ", group="Timeframes")
+
+// Fibonacci retracement settings
+fib_min = input.float(61.8, "Minimum Fib Retracement %", minval=50.0, maxval=90.0, group="Fibonacci Levels")
+fib_max = input.float(78.6, "Maximum Fib Retracement %", minval=50.0, maxval=90.0, group="Fibonacci Levels")
+sweet_spot = input.float(70.2, "Sweet Spot Level %", minval=50.0, maxval=90.0, group="Fibonacci Levels")
+
+// Pattern recognition settings
+pattern_range = input.int(7, "Pattern Width (bars)", minval=5, maxval=20, group="Pattern Recognition")
+pattern_offset = input.int(2, "Pattern Offset (bars)", minval=0, maxval=10, group="Pattern Recognition")
+strict_patterns = input.bool(true, "Strict Pattern Matching", group="Pattern Recognition")
+
+// Momentum indicator settings
+williams_period = input.int(14, "Williams %R Period", minval=5, maxval=50, group="Momentum Indicators")
+macd_fast = input.int(12, "MACD Fast Period", minval=5, maxval=50, group="Momentum Indicators")
+macd_slow = input.int(26, "MACD Slow Period", minval=10, maxval=100, group="Momentum Indicators")
+macd_signal = input.int(9, "MACD Signal Period", minval=5, maxval=25, group="Momentum Indicators")
+rsi_period = input.int(14, "RSI Period", minval=5, maxval=50, group="Momentum Indicators")
+obv_ema_period = input.int(20, "OBV EMA Period", minval=5, maxval=50, group="Momentum Indicators")
+
+// Risk management
+base_risk = input.float(1.0, "Base Risk %", minval=0.5, maxval=5.0, group="Risk Management")
+risk_increment = input.float(1.0, "Risk Increment %", minval=0.5, maxval=2.0, group="Risk Management")
+
+// Visual settings
+show_patterns = input.bool(true, "Show Pattern Levels", group="Display")
+show_fib_levels = input.bool(true, "Show Fibonacci Levels", group="Display")
+show_momentum = input.bool(true, "Show Momentum Signals", group="Display")
+show_info_table = input.bool(true, "Show Info Table", group="Display")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// HIGHER TIMEFRAME ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Get higher timeframe data
+htf_high = request.security(syminfo.tickerid, higher_timeframe, high)
+htf_low = request.security(syminfo.tickerid, higher_timeframe, low)
+htf_close = request.security(syminfo.tickerid, higher_timeframe, close)
+
+// Calculate recent swing highs and lows
+swing_high = ta.highest(htf_high, 20)
+swing_low = ta.lowest(htf_low, 20)
+
+// Determine trend direction
+trend_direction = htf_close > htf_close[10] ? 1 : htf_close < htf_close[10] ? -1 : 0
+
+// Calculate Fibonacci levels
+move_size = swing_high - swing_low
+fib_61_8 = trend_direction == -1 ? swing_low + (move_size * fib_min / 100) : swing_high - (move_size * fib_min / 100)
+fib_78_6 = trend_direction == -1 ? swing_low + (move_size * fib_max / 100) : swing_high - (move_size * fib_max / 100)
+fib_sweet = trend_direction == -1 ? swing_low + (move_size * sweet_spot / 100) : swing_high - (move_size * sweet_spot / 100)
+
+// Location confirmation
+location_confirmed = trend_direction == -1 ? (close >= fib_61_8 and close <= fib_78_6) : (close <= fib_61_8 and close >= fib_78_6)
+below_sweet_spot = trend_direction == -1 ? close < fib_sweet : close > fib_sweet
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PATTERN RECOGNITION (ADAPTED FROM DAV-O)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// W Pattern Detection Function (Double Bottom)
+detect_w_pattern(series, range_bars, offset_bars, strict) =>
+    var int point_a = na, var int point_b = na, var int point_c = na, var int point_d = na, var int point_e = 0
+    var float value_a = na, var float value_b = na, var float value_c = na, var float value_d = na, var float value_e = na
+    found = false
+    
+    for offset = 0 to offset_bars
+        if found
+            break
+        
+        point_a := na, point_b := na, point_c := na, point_d := na, point_e := 0
+        value_a := series, value_b := series, value_c := series, value_d := series, value_e := series
+        
+        for i = 1 to range_bars - 1
+            // Find point D (first low after current)
+            if na(value_d) and series[i + offset] < series[i + offset - 1]
+                point_d := i + offset
+                value_d := series[i + offset]
+                continue
+            if na(point_d)
+                break
+            
+            // Find point C (high after D)
+            if na(value_c) and series[i + offset] > series[i + offset - 1]
+                point_c := i + offset
+                value_c := series[i + offset]
+                continue
+            if na(point_c)
+                break
+            
+            // Find point B (low after C)
+            if na(value_b) and series[i + offset] < series[i + offset - 1]
+                point_b := i + offset
+                value_b := series[i + offset]
+                continue
+            if na(point_b)
+                break
+            
+            // Find point A (high after B)
+            if na(value_a) and series[i + offset] > series[i + offset - 1]
+                point_a := i + offset
+                value_a := series[i + offset]
+                continue
+            if na(point_a)
+                break
+        
+        // W found if all points exist and follow W pattern rules
+        if not na(point_a) and not na(point_b) and not na(point_c) and not na(point_d)
+            w_rules = series > value_c and // E > C
+                     value_d < series and value_d < value_c and // D < E and D < C
+                     (value_b <= value_d or not strict) and value_b < value_a // B <= D (if strict) and B < A
+            found := w_rules
+    
+    [found, point_a, point_b, point_c, point_d, point_e]
+
+// M Pattern Detection Function (Double Top)
+detect_m_pattern(series, range_bars, offset_bars, strict) =>
+    var int point_a = na, var int point_b = na, var int point_c = na, var int point_d = na, var int point_e = 0
+    var float value_a = na, var float value_b = na, var float value_c = na, var float value_d = na, var float value_e = na
+    found = false
+    
+    for offset = 0 to offset_bars
+        if found
+            break
+        
+        point_a := na, point_b := na, point_c := na, point_d := na, point_e := 0
+        value_a := series, value_b := series, value_c := series, value_d := series, value_e := series
+        
+        for i = 1 to range_bars - 1
+            // Find point D (first high after current)
+            if na(value_d) and series[i + offset] > series[i + offset - 1]
+                point_d := i + offset
+                value_d := series[i + offset]
+                continue
+            if na(point_d)
+                break
+            
+            // Find point C (low after D)
+            if na(value_c) and series[i + offset] < series[i + offset - 1]
+                point_c := i + offset
+                value_c := series[i + offset]
+                continue
+            if na(point_c)
+                break
+            
+            // Find point B (high after C)
+            if na(value_b) and series[i + offset] > series[i + offset - 1]
+                point_b := i + offset
+                value_b := series[i + offset]
+                continue
+            if na(point_b)
+                break
+            
+            // Find point A (low after B)
+            if na(value_a) and series[i + offset] < series[i + offset - 1]
+                point_a := i + offset
+                value_a := series[i + offset]
+                continue
+            if na(point_a)
+                break
+        
+        // M found if all points exist and follow M pattern rules
+        if not na(point_a) and not na(point_b) and not na(point_c) and not na(point_d)
+            m_rules = series < value_c and // E < C
+                     value_d > series and value_d > value_c and // D > E and D > C
+                     (value_b >= value_d or not strict) and value_b > value_a // B >= D (if strict) and B > A
+            found := m_rules
+    
+    [found, point_a, point_b, point_c, point_d, point_e]
+
+// Head and Shoulders Detection (simplified)
+detect_head_shoulders(series, range_bars) =>
+    peaks = array.new<float>()
+    valleys = array.new<float>()
+    
+    // Find peaks and valleys
+    for i = 2 to range_bars - 2
+        if series[i] > series[i-1] and series[i] > series[i+1]
+            array.push(peaks, series[i])
+        if series[i] < series[i-1] and series[i] < series[i+1]
+            array.push(valleys, series[i])
+    
+    // Check for H&S pattern (3 peaks with middle one highest)
+    hs_found = false
+    if array.size(peaks) >= 3
+        peak1 = array.get(peaks, 0)
+        peak2 = array.get(peaks, 1) // Head
+        peak3 = array.get(peaks, 2)
+        
+        // Head higher than shoulders, shoulders roughly equal
+        if peak2 > peak1 and peak2 > peak3 and math.abs(peak1 - peak3) / peak1 < 0.02
+            hs_found := true
+    
+    hs_found
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// MOMENTUM INDICATORS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Williams %R
+williams_r = -100 * (ta.highest(high, williams_period) - close) / (ta.highest(high, williams_period) - ta.lowest(low, williams_period))
+williams_ema = ta.ema(williams_r, 14)
+
+// MACD
+[macd_line, macd_signal_line, macd_histogram] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// RSI
+rsi = ta.rsi(close, rsi_period)
+
+// OBV
+obv = ta.obv
+obv_ema = ta.ema(obv, obv_ema_period)
+
+// Volume Impetus (3 successive bars)
+volume_impetus_bull = volume > volume[1] and volume[1] > volume[2] and 
+                      close > close[1] and close[1] > close[2]
+volume_impetus_bear = volume > volume[1] and volume[1] > volume[2] and 
+                      close < close[1] and close[1] < close[2]
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// MOMENTUM CONFIRMATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Williams %R confirmation
+williams_confirmed_bull = williams_r < -80 and ta.crossover(williams_r, williams_ema)
+williams_confirmed_bear = williams_r > -20 and ta.crossunder(williams_r, williams_ema)
+
+// MACD confirmation (looking for double bottom/top in MACD)
+[macd_w_found, , , , , ] = detect_w_pattern(macd_line, pattern_range, pattern_offset, strict_patterns)
+[macd_m_found, , , , , ] = detect_m_pattern(macd_line, pattern_range, pattern_offset, strict_patterns)
+
+// RSI confirmation
+rsi_confirmed_bull = rsi < 30 // Oversold
+rsi_confirmed_bear = rsi > 70 // Overbought
+
+// OBV confirmation
+obv_confirmed_bull = ta.crossover(obv, obv_ema) and volume_impetus_bull
+obv_confirmed_bear = ta.crossunder(obv, obv_ema) and volume_impetus_bear
+
+// Count momentum confirmations
+momentum_count_bull = (williams_confirmed_bull ? 1 : 0) + (macd_w_found ? 1 : 0) + (rsi_confirmed_bull ? 1 : 0) + (obv_confirmed_bull ? 1 : 0)
+momentum_count_bear = (williams_confirmed_bear ? 1 : 0) + (macd_m_found ? 1 : 0) + (rsi_confirmed_bear ? 1 : 0) + (obv_confirmed_bear ? 1 : 0)
+
+momentum_confirmed_bull = momentum_count_bull >= 2
+momentum_confirmed_bear = momentum_count_bear >= 2
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PRICE STRUCTURE ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Detect price patterns
+[price_w_found, , , , , ] = detect_w_pattern(close, pattern_range, pattern_offset, strict_patterns)
+[price_m_found, , , , , ] = detect_m_pattern(close, pattern_range, pattern_offset, strict_patterns)
+hs_found = detect_head_shoulders(close, pattern_range)
+
+// Structure confirmation
+structure_confirmed_bull = price_w_found
+structure_confirmed_bear = price_m_found or hs_found
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// RISK CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate dynamic risk
+additional_risk_bull = (below_sweet_spot and trend_direction == -1 ? risk_increment : 0) + 
+                      (hs_found ? risk_increment : 0) + 
+                      (momentum_count_bull > 3 ? risk_increment : 0)
+
+additional_risk_bear = (below_sweet_spot and trend_direction == 1 ? risk_increment : 0) + 
+                      (hs_found ? risk_increment : 0) + 
+                      (momentum_count_bear > 3 ? risk_increment : 0)
+
+current_risk_bull = base_risk + additional_risk_bull
+current_risk_bear = base_risk + additional_risk_bear
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// COMPLETE SETUP VALIDATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Bullish Reload Ranger Setup
+bullish_setup = trend_direction == -1 and                    // Bearish higher timeframe trend
+                location_confirmed and                       // In Fibonacci retracement zone
+                structure_confirmed_bull and                 // W pattern in price
+                momentum_confirmed_bull                      // At least 2 momentum confirmations
+
+// Bearish Reload Ranger Setup
+bearish_setup = trend_direction == 1 and                     // Bullish higher timeframe trend
+                location_confirmed and                       // In Fibonacci retracement zone
+                structure_confirmed_bear and                 // M or H&S pattern in price
+                momentum_confirmed_bear                      // At least 2 momentum confirmations
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PROFIT TARGET AND STOP LOSS CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate 50% retracement target
+latest_high = ta.highest(high, 50)
+latest_low = ta.lowest(low, 50)
+
+profit_target_bull = latest_low + ((latest_high - latest_low) * 0.5)
+profit_target_bear = latest_high - ((latest_high - latest_low) * 0.5)
+
+// Calculate stop loss
+stop_loss_bull = ta.lowest(low, 20) - (ta.atr(14) * 0.5)
+stop_loss_bear = ta.highest(high, 20) + (ta.atr(14) * 0.5)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// VISUAL ELEMENTS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Plot Fibonacci levels
+plot(show_fib_levels ? fib_61_8 : na, "Fib 61.8%", color.yellow, 1, plot.style_line)
+plot(show_fib_levels ? fib_78_6 : na, "Fib 78.6%", color.orange, 1, plot.style_line)
+plot(show_fib_levels ? fib_sweet : na, "Sweet Spot", color.blue, 2, plot.style_line)
+
+// Plot entry signals
+plotshape(bullish_setup, "Bullish Setup", shape.triangleup, location.belowbar, color.lime, size=size.normal, text="RR BULL")
+plotshape(bearish_setup, "Bearish Setup", shape.triangledown, location.abovebar, color.red, size=size.normal, text="RR BEAR")
+
+// Plot profit targets and stops
+plotshape(bullish_setup ? profit_target_bull : na, "Bull Target", shape.circle, location.absolute, color.green, size=size.small)
+plotshape(bearish_setup ? profit_target_bear : na, "Bear Target", shape.circle, location.absolute, color.red, size=size.small)
+
+plotshape(bullish_setup ? stop_loss_bull : na, "Bull Stop", shape.xcross, location.absolute, color.red, size=size.small)
+plotshape(bearish_setup ? stop_loss_bear : na, "Bear Stop", shape.xcross, location.absolute, color.red, size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+alertcondition(bullish_setup, "Bullish Reload Ranger", "Bullish Reload Ranger Setup - {{ticker}} at {{close}}")
+alertcondition(bearish_setup, "Bearish Reload Ranger", "Bearish Reload Ranger Setup - {{ticker}} at {{close}}")
+
+// Component alerts
+alertcondition(location_confirmed, "Location Confirmed", "Price in Fibonacci zone - {{ticker}} at {{close}}")
+alertcondition(structure_confirmed_bull, "Bullish Structure", "W pattern detected - {{ticker}} at {{close}}")
+alertcondition(structure_confirmed_bear, "Bearish Structure", "M/H&S pattern detected - {{ticker}} at {{close}}")
+alertcondition(momentum_confirmed_bull, "Bullish Momentum", "Bullish momentum confluence - {{ticker}} at {{close}}")
+alertcondition(momentum_confirmed_bear, "Bearish Momentum", "Bearish momentum confluence - {{ticker}} at {{close}}")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// INFORMATION TABLE
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+if show_info_table and barstate.islast
+    var table info_table = table.new(position.top_left, 2, 12, bgcolor=color.white, border_width=1)
+    
+    table.cell(info_table, 0, 0, "Reload Ranger Status", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 0, "", text_color=color.black, text_size=size.small)
+    
+    // Current trend
+    trend_text = trend_direction == 1 ? "BULLISH" : trend_direction == -1 ? "BEARISH" : "SIDEWAYS"
+    trend_color = trend_direction == 1 ? color.green : trend_direction == -1 ? color.red : color.gray
+    table.cell(info_table, 0, 1, "HTF Trend", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 1, trend_text, text_color=trend_color, text_size=size.small)
+    
+    // Location status
+    table.cell(info_table, 0, 2, "Location Confirmed", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 2, location_confirmed ? "YES" : "NO", 
+               text_color=location_confirmed ? color.green : color.red, text_size=size.small)
+    
+    // Structure status
+    table.cell(info_table, 0, 3, "Structure (Bull)", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 3, structure_confirmed_bull ? "YES" : "NO", 
+               text_color=structure_confirmed_bull ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 4, "Structure (Bear)", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 4, structure_confirmed_bear ? "YES" : "NO", 
+               text_color=structure_confirmed_bear ? color.green : color.red, text_size=size.small)
+    
+    // Momentum status
+    table.cell(info_table, 0, 5, "Momentum (Bull)", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 5, str.tostring(momentum_count_bull) + "/4", 
+               text_color=momentum_confirmed_bull ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 6, "Momentum (Bear)", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 6, str.tostring(momentum_count_bear) + "/4", 
+               text_color=momentum_confirmed_bear ? color.green : color.red, text_size=size.small)
+    
+    // Risk levels
+    table.cell(info_table, 0, 7, "Bull Risk", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 7, str.tostring(current_risk_bull, "#.#") + "%", text_color=color.blue, text_size=size.small)
+    
+    table.cell(info_table, 0, 8, "Bear Risk", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 8, str.tostring(current_risk_bear, "#.#") + "%", text_color=color.blue, text_size=size.small)
+    
+    // Current price vs levels
+    table.cell(info_table, 0, 9, "Current Price", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 9, str.tostring(close, "#.##"), text_color=color.black, text_size=size.small)
+    
+    table.cell(info_table, 0, 10, "Sweet Spot", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 10, str.tostring(fib_sweet, "#.##"), text_color=color.blue, text_size=size.small)
+    
+    // Setup status
+    setup_status = bullish_setup ? "BULLISH SETUP" : bearish_setup ? "BEARISH SETUP" : "NO SETUP"
+    setup_color = bullish_setup ? color.lime : bearish_setup ? color.red : color.gray
+    table.cell(info_table, 0, 11, "Setup Status", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 11, setup_status, text_color=setup_color, text_size=size.small)

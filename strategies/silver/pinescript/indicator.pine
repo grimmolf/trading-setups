@@ -1,0 +1,296 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © trading-setups
+
+//@version=5
+indicator(title="Silver Setup Indicator", shorttitle="Silver", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// INPUT PARAMETERS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Time session filters
+time_session_1 = input.session("0700-0900", "Morning Session (7-9 AM)", group="Time Windows")
+time_session_2 = input.session("1000-1200", "Mid-Day Session (10 AM-12 PM)", group="Time Windows")
+time_session_3 = input.session("", "Optional Third Session", group="Time Windows")
+
+// Risk management parameters
+risk_multiplier = input.float(4.6, "Take Profit Multiplier", minval=1.0, maxval=10.0, step=0.1, group="Risk Management")
+stop_offset = input.int(3, "Stop Loss Offset (bars)", minval=1, maxval=5, group="Risk Management")
+
+// Visual settings
+show_paint_levels = input.bool(true, "Show Paint Bar Levels", group="Display Options")
+show_stop_target = input.bool(true, "Show Stop/Target Levels", group="Display Options")
+show_entry_signals = input.bool(true, "Show Entry Signals", group="Display Options")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PAINT BAR DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Paint bar conditions
+bull_paint_condition = low > high[2]
+bear_paint_condition = high < low[2]
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// TIME SESSION MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Time session detection
+is_time_1 = time(timeframe.period, time_session_1, "America/Los_Angeles")
+is_time_2 = time(timeframe.period, time_session_2, "America/Los_Angeles")
+is_time_3 = time(timeframe.period, time_session_3, "America/Los_Angeles")
+
+// Combined time window filter
+in_time_window = (not na(is_time_1) or not na(is_time_2) or not na(is_time_3)) and 
+                 dayofweek != dayofweek.saturday and dayofweek != dayofweek.sunday
+
+// Daily close detection (1 PM Pacific)
+close_time = time(timeframe.period, "1300-1301", "America/Los_Angeles")
+should_close = not na(close_time) and dayofweek != dayofweek.saturday and dayofweek != dayofweek.sunday
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// STATE MANAGEMENT VARIABLES
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Bull paint state variables
+var float bull_paint_high = na
+var float bull_paint_low = na
+var float bull_stop_level = na
+var float bull_target_level = na
+var bool bull_paint_active = false
+var bool bull_position_open = false
+
+// Bear paint state variables
+var float bear_paint_low = na
+var float bear_paint_high = na
+var float bear_stop_level = na
+var float bear_target_level = na
+var bool bear_paint_active = false
+var bool bear_position_open = false
+
+// Entry/exit trigger variables
+var bool long_entry_triggered = false
+var bool short_entry_triggered = false
+var bool long_exit_triggered = false
+var bool short_exit_triggered = false
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PAINT BAR DETECTION AND LEVEL CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Detect new bull paint bar
+if bull_paint_condition and not bull_paint_active
+    bull_paint_high := high
+    bull_paint_low := low
+    bull_stop_level := low[stop_offset]
+    
+    // Calculate take profit level (risk multiplier)
+    risk_distance = bull_paint_low - bull_stop_level
+    bull_target_level := bull_paint_low + (risk_distance * risk_multiplier)
+    
+    bull_paint_active := true
+    bear_paint_active := false  // Cancel opposing paint
+
+// Detect new bear paint bar
+if bear_paint_condition and not bear_paint_active
+    bear_paint_low := low
+    bear_paint_high := high
+    bear_stop_level := high[stop_offset]
+    
+    // Calculate take profit level (risk multiplier)
+    risk_distance = bear_stop_level - bear_paint_high
+    bear_target_level := bear_paint_high - (risk_distance * risk_multiplier)
+    
+    bear_paint_active := true
+    bull_paint_active := false  // Cancel opposing paint
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// ENTRY CONDITIONS (3 REASONS: LOCATION, STRUCTURE, MOMENTUM)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Long entry conditions
+long_location = in_time_window  // Reason 1: Location (time window)
+long_momentum = bull_paint_active  // Reason 2: Momentum (paint bar directional bias)
+long_structure = close > bull_paint_low and close < bull_paint_high and low <= bull_paint_low  // Reason 3: Structure (price re-entry)
+long_filter = not bull_position_open and not bear_position_open  // Position filter
+
+long_entry_condition = long_location and long_momentum and long_structure and long_filter
+
+// Short entry conditions
+short_location = in_time_window  // Reason 1: Location (time window)
+short_momentum = bear_paint_active  // Reason 2: Momentum (paint bar directional bias)
+short_structure = close < bear_paint_high and close > bear_paint_low and high >= bear_paint_high  // Reason 3: Structure (price re-entry)
+short_filter = not bear_position_open and not bull_position_open  // Position filter
+
+short_entry_condition = short_location and short_momentum and short_structure and short_filter
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// POSITION MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Track position openings
+if long_entry_condition and not long_entry_triggered
+    long_entry_triggered := true
+    bull_position_open := true
+    bull_paint_active := false
+
+if short_entry_condition and not short_entry_triggered
+    short_entry_triggered := true
+    bear_position_open := true
+    bear_paint_active := false
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// EXIT CONDITIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Long position exits
+if bull_position_open
+    long_stop_hit = low <= bull_stop_level
+    long_target_hit = high >= bull_target_level
+    long_daily_close = should_close
+    
+    if (long_stop_hit or long_target_hit or long_daily_close) and not long_exit_triggered
+        long_exit_triggered := true
+        bull_position_open := false
+
+// Short position exits
+if bear_position_open
+    short_stop_hit = high >= bear_stop_level
+    short_target_hit = low <= bear_target_level
+    short_daily_close = should_close
+    
+    if (short_stop_hit or short_target_hit or short_daily_close) and not short_exit_triggered
+        short_exit_triggered := true
+        bear_position_open := false
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// TRIGGER RESET (PREVENT MULTIPLE SIGNALS ON SAME BAR)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Reset triggers for next bar
+if long_entry_triggered[1]
+    long_entry_triggered := false
+if short_entry_triggered[1]
+    short_entry_triggered := false
+if long_exit_triggered[1]
+    long_exit_triggered := false
+if short_exit_triggered[1]
+    short_exit_triggered := false
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PAINT BAR CLEANUP (REMOVE STALE PAINT BARS)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Reset bull paint if price moves too far away
+if bull_paint_active and (high > bull_paint_high * 1.1 or low < bull_stop_level)
+    bull_paint_active := false
+
+// Reset bear paint if price moves too far away
+if bear_paint_active and (low < bear_paint_low * 0.9 or high > bear_stop_level)
+    bear_paint_active := false
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// VISUAL ELEMENTS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Paint bar coloring
+barcolor(bull_paint_condition ? color.green : bear_paint_condition ? color.red : na, offset=-1)
+
+// Entry signal shapes
+plotshape(show_entry_signals and long_entry_triggered, title="Long Entry", 
+          style=shape.triangleup, location=location.belowbar, color=color.lime, 
+          size=size.normal, text="LONG")
+
+plotshape(show_entry_signals and short_entry_triggered, title="Short Entry", 
+          style=shape.triangledown, location=location.abovebar, color=color.red, 
+          size=size.normal, text="SHORT")
+
+// Paint bar levels
+plot(show_paint_levels and bull_paint_active ? bull_paint_high : na, 
+     color=color.new(color.green, 50), style=plot.style_line, linewidth=2, title="Bull Paint High")
+plot(show_paint_levels and bull_paint_active ? bull_paint_low : na, 
+     color=color.new(color.green, 50), style=plot.style_line, linewidth=2, title="Bull Paint Low")
+
+plot(show_paint_levels and bear_paint_active ? bear_paint_high : na, 
+     color=color.new(color.red, 50), style=plot.style_line, linewidth=2, title="Bear Paint High")
+plot(show_paint_levels and bear_paint_active ? bear_paint_low : na, 
+     color=color.new(color.red, 50), style=plot.style_line, linewidth=2, title="Bear Paint Low")
+
+// Stop and target levels
+plot(show_stop_target and bull_position_open ? bull_stop_level : na, 
+     color=color.new(color.red, 20), style=plot.style_line, linewidth=3, title="Bull Stop")
+plot(show_stop_target and bull_position_open ? bull_target_level : na, 
+     color=color.new(color.blue, 20), style=plot.style_line, linewidth=3, title="Bull Target")
+
+plot(show_stop_target and bear_position_open ? bear_stop_level : na, 
+     color=color.new(color.red, 20), style=plot.style_line, linewidth=3, title="Bear Stop")
+plot(show_stop_target and bear_position_open ? bear_target_level : na, 
+     color=color.new(color.blue, 20), style=plot.style_line, linewidth=3, title="Bear Target")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Entry alerts
+alertcondition(long_entry_triggered, title="Long Entry Alert", 
+               message="{{ticker}} - LONG Entry at {{close}}, Stop: " + str.tostring(bull_stop_level, "#.##") + 
+                      ", Target: " + str.tostring(bull_target_level, "#.##"))
+
+alertcondition(short_entry_triggered, title="Short Entry Alert", 
+               message="{{ticker}} - SHORT Entry at {{close}}, Stop: " + str.tostring(bear_stop_level, "#.##") + 
+                      ", Target: " + str.tostring(bear_target_level, "#.##"))
+
+// Exit alerts
+alertcondition(long_exit_triggered, title="Long Exit Alert", 
+               message="{{ticker}} - LONG Exit at {{close}}")
+
+alertcondition(short_exit_triggered, title="Short Exit Alert", 
+               message="{{ticker}} - SHORT Exit at {{close}}")
+
+// Daily close alert
+alertcondition(should_close, title="Daily Close Alert", 
+               message="{{ticker}} - Daily Close 1pm PT at {{close}}")
+
+// Paint bar detection alerts
+alertcondition(bull_paint_condition, title="Bull Paint Bar Alert", 
+               message="{{ticker}} - Bull Paint Bar detected at {{close}}")
+
+alertcondition(bear_paint_condition, title="Bear Paint Bar Alert", 
+               message="{{ticker}} - Bear Paint Bar detected at {{close}}")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// INFORMATION TABLE (OPTIONAL)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Display current state information
+if barstate.islast
+    var table info_table = table.new(position.top_right, 2, 8, bgcolor=color.white, border_width=1)
+    
+    table.cell(info_table, 0, 0, "Silver Setup Status", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 0, "", text_color=color.black, text_size=size.small)
+    
+    table.cell(info_table, 0, 1, "Bull Paint Active", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 1, bull_paint_active ? "YES" : "NO", 
+               text_color=bull_paint_active ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 2, "Bear Paint Active", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 2, bear_paint_active ? "YES" : "NO", 
+               text_color=bear_paint_active ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 3, "Bull Position Open", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 3, bull_position_open ? "YES" : "NO", 
+               text_color=bull_position_open ? color.blue : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 4, "Bear Position Open", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 4, bear_position_open ? "YES" : "NO", 
+               text_color=bear_position_open ? color.blue : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 5, "In Time Window", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 5, in_time_window ? "YES" : "NO", 
+               text_color=in_time_window ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 6, "Risk Multiplier", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 6, str.tostring(risk_multiplier, "#.#") + "R", 
+               text_color=color.black, text_size=size.small)
+    
+    table.cell(info_table, 0, 7, "Next Close Time", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 7, "1:00 PM PT", text_color=color.black, text_size=size.small)

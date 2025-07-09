@@ -1,0 +1,600 @@
+// LOVE JOY PEACE PATIENCE KINDNESS GOODNESS FAITHFULNESS GENTLENESS SELF-CONTROL 
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//  Trade Concept:  Brian Beamish (TRI)
+//  Updated by:     JoshuaMcGowan
+//  Date:           23rd-Jan-2019
+//
+//  Authors:        Daveatt & JoshuaMcGowan
+//  Date:           3rd-Jan-2019
+//  Revision:       20th-April-2020
+
+//@version=4
+
+// // 🔸 TO BE COMMENTED WHEN IN STUDY MODE 🔸
+// strategy(title="SCDTM - Unemployment Edition - Strategy", shorttitle="Brian Beamish aka Mr. Stone Cold is DA MAN", overlay=true, 
+//  pyramiding=0, default_qty_value=100, precision=7, currency=currency.USD,
+//  commission_value=0.2,commission_type=strategy.commission.percent, initial_capital=10000)
+// // 🔸 END OF COMMENT ZONE 🔸
+
+study(title="SCDTM - Unemployment Edition", overlay=true,precision=7)
+
+//
+src          = input(close, title="Strategy Source")
+
+////////////////////////////////////////////////
+//* Variable and Global Variable Declaration *//
+////////////////////////////////////////////////
+
+var longClose           = 0 // These are used when stopped out in an active trade
+var shortClose          = 0
+
+var longCloseTgt        = 0 // These are used when target reached in an active trade
+var shortCloseTgt       = 0
+
+// Global Checkpoint Variable Declarations
+var cp1 = 0 // Trending EMAs
+var cp2 = 0 // %B w/ Trend & Stoch RSI crossover w/ Trend
+var cp3 = 0 // 5 Bar Fractal w/ cp1 and cp2 and tradeState==0
+var cp4 = 0 // When CP3 fires it sets CP4==1 with persistence as "Unconfirmed Signal"
+var cp5 = 0 // Market Buy on Stop of Breakout Level. Trade Active
+var cp6 = 0 // Unused
+var cp7 = 0 // Unused
+var cp8 = 0 // Unused
+
+// Checkpoint 3 - Global Variables
+//Trade State Values. 
+//0=No orders working and not in active trade. 
+//1=Orders working.
+//2=Active long.
+//3=Active short.
+var tradeState = 0
+
+// Checkpoint 4 - Global Variables
+var float bull_breakout_price = na
+var float bull_fractal_sl = na
+var float bear_breakout_price = na
+var float bear_fractal_sl = na
+
+var float entry_buy = na
+var float entry_sell = na
+var float entry_fill = na
+var float fractal_dist  = na
+var float fractal_be = na
+var float fractal_tgt = na
+
+var confirmed = 0 // Unused
+var filled = 0 // Unused
+
+// Plot Counters //  
+plotWinCounter = 0
+plotWinCounter := nz(plotWinCounter[1])
+
+plotLossCounter = 0
+plotLossCounter := nz(plotLossCounter[1])
+
+plotBECounter = 0 // Unused
+plotBECounter := nz(plotBECounter[1])
+
+///////////////////////////////////////////////
+//* Backtesting Period Selector | Component *//
+///////////////////////////////////////////////
+
+// 🔸 TO BE COMMENTED WHEN IN STUDY MODE 🔸
+// testStartYear = input(2019, "Backtest Start Year",minval=1980)
+// testStartMonth = input(10, "Backtest Start Month",minval=1,maxval=12)
+// testStartDay = input(1, "Backtest Start Day",minval=1,maxval=31)
+// testPeriodStart = timestamp(testStartYear,testStartMonth,testStartDay,0,0)
+
+// testStopYear = input(2020, "Backtest Stop Year",minval=1980)
+// testStopMonth = input(12, "Backtest Stop Month",minval=1,maxval=12)
+// testStopDay = input(31, "Backtest Stop Day",minval=1,maxval=31)
+// testPeriodStop = timestamp(testStopYear,testStopMonth,testStopDay,0,0)
+
+// testPeriod() => time >= testPeriodStart and time <= testPeriodStop ? true : false
+// 🔸 END OF COMMENT ZONE 🔸
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Checkpoint 1 - Institutional Bias across 3 timeframes pointing same direction. 
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+//* EMA | Component *// 
+
+ema9 = ema(src, 9)
+ema18 = ema(src, 18)
+
+// Daily
+ema9_D          =   security(syminfo.tickerid, 'D', ema9, lookahead=barmerge.lookahead_on)
+ema18_D         =   security(syminfo.tickerid, 'D', ema18, lookahead=barmerge.lookahead_on)
+
+bull_ema_daily  =   ema9_D >= ema18_D ? 1 : 0
+bear_ema_daily  =   ema9_D < ema18_D  ? 1 : 0
+
+// H4
+ema9_H4         =   security(syminfo.tickerid, '240', ema9, lookahead=barmerge.lookahead_on)
+ema18_H4        =   security(syminfo.tickerid, '240', ema18, lookahead=barmerge.lookahead_on)
+
+bull_ema_H4     =   ema9_H4 >= ema18_H4 ? 1 : 0
+bear_ema_H4     =   ema9_H4 < ema18_H4  ? 1 : 0
+
+// H1
+ema9_H1         =   security(syminfo.tickerid, '60', ema9, lookahead=barmerge.lookahead_on)
+ema18_H1        =   security(syminfo.tickerid, '60', ema18, lookahead=barmerge.lookahead_on)
+
+bull_ema_H1     =   ema9_H1 >= ema18_H1 ? 1 : 0
+bear_ema_H1     =   ema9_H1 < ema18_H1  ? 1 : 0
+
+// 30m
+ema9_30         =   security(syminfo.tickerid, '30', ema9, lookahead=barmerge.lookahead_on)
+ema18_30        =   security(syminfo.tickerid, '30', ema18, lookahead=barmerge.lookahead_on)
+
+bull_ema_30     =   ema9_30 >= ema18_30 ? 1 : 0
+bear_ema_30     =   ema9_30 < ema18_30  ? 1 : 0
+
+// Consolidating the EMA conditons
+bull_ema_index  = bull_ema_daily + bull_ema_H4 + bull_ema_H1
+bull_ema        = bull_ema_index == 3
+
+bear_ema_index  = bear_ema_daily + bear_ema_H4 + bear_ema_H1
+bear_ema        = bear_ema_index == 3
+
+// For Globally declared variables use if expressions to update values.
+// https://www.tradingview.com/pine-script-reference/v4/#op_if 
+// Updates Global Variable Without Persistence (On/Off Switch)
+if (bull_ema_index == 3) or (bear_ema_index == 3)
+    cp1 := 1
+else
+    cp1 := 0
+    
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Checkpoint 2 - With CP1 equal to 1 we are looking for %B and Stoch RSI readings supporting the return to mean
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// BB% Inputs
+length_bbr = input(20, minval=1, title="Length BB%")
+src_bbr = input(close, title="Source BB%")
+mult_bbr = input(2.0, minval=0.001, maxval=50, title="Std Dev BB%")
+upper_thresh = input(1.00, minval=0.001, maxval=2, title="Upper Threshold BB%")
+lower_thresh = input(0.00, minval=0.001, maxval=2, title="Lower Threshold BB%")
+
+// BB% Variables
+basis_bbr = sma(src_bbr, length_bbr)
+dev_bbr = mult_bbr * stdev(src_bbr, length_bbr)
+upper_bbr = basis_bbr + dev_bbr
+lower_bbr = basis_bbr - dev_bbr
+bbr = (src_bbr - lower_bbr)/(upper_bbr - lower_bbr)
+
+// Signals Long/Short Return To The Mean
+var long_bbr = 0 // Global Variable 
+
+if (bbr <= lower_thresh) // Thresholds have been set back to default out of the box %B 
+    long_bbr := 1
+
+if (bbr >= 0.55) and (long_bbr == 1) // If this signal gets too long in the tooth it resets
+    long_bbr := 0
+
+var short_bbr = 0 // Global Variable 
+
+if (bbr >= upper_thresh)
+    short_bbr := 1
+    
+if (bbr <= 0.45) and (short_bbr == 1) // If this signal gets too long in the tooth it resets
+    short_bbr := 0
+
+// Stoch RSI Component
+smoothK = input(3, minval=1)
+smoothD = input(3, minval=1)
+lengthRSI = input(14, minval=1)
+lengthStoch = input(14, minval=1)
+srcStoch = input(close, title="RSI Source")
+
+rsi1 = rsi(src, lengthRSI)
+k = sma(stoch(rsi1, rsi1, rsi1, lengthStoch), smoothK) // fast
+d = sma(k, smoothD) // slow
+
+// Signals Long/Short Return To The Mean
+var long_rsi = 0 // Global Variable 
+
+if (k >= d) // Fast over slow
+    long_rsi := 1
+else
+    long_rsi := 0
+
+var short_rsi = 0 // Global Variable 
+
+if (d >= k) // Slow over fast
+    short_rsi := 1
+else
+    short_rsi := 0
+    
+// Sets Checkpoint 2 // Requires Trending MA's and BB% in agreement. 
+if ((bear_ema_index == 3) and (short_bbr==1) and (short_rsi==1)) or ((bull_ema_index == 3) and (long_bbr==1) and (long_rsi==1))  
+    cp2 := 1
+else
+    cp2 := 0
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Checkpoint 3 & 4 - With CP2 equal to 1 we are looking for 3 or 5 bar fractals going the same direction when not in an active trade. 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Define "n" as the number of periods and keep a minimum value of 2 for error handling.
+n = input(title="Periods", defval=2, minval=2, type=input.integer)
+fractalBars = input(title="3 or 5 Bar Fractal", defval="5", options=["3", "5"])
+colorcandles = input(title="Colored Candles", defval=false)
+
+// Logic 
+dnFractal = if fractalBars == "5"
+    dnFractal5 = (high[n-2] < high[n]) and (high[n-1] < high[n]) and (high[n+1] < high[n]) and (high[n+2] < high[n])
+else
+    if fractalBars == "3"
+        dnFractal3 = (high[n-1] < high[n]) and (high[n+1] < high[n]) 
+
+upFractal = if fractalBars == "5"
+    upFractal5 = (low[n-2] > low[n]) and (low[n-1] > low[n]) and (low[n+1] > low[n]) and (low[n+2] > low[n])
+else
+    if fractalBars == "3"
+        upFractal3 = (low[n-1] > low[n]) and (low[n+1] > low[n]) 
+
+//Bar Color Definitions
+isorange = (fractalBars =="3")
+ispurple = (fractalBars =="5")
+
+candlecolor = isorange? color.new(#FF9F20,0): ispurple? color.new(#500050,0): color.black
+
+// Updates Global Variable Without Persistence (On/Off Switch) // Exclude Fractal Midpoints that occur on Close Signals
+if (cp2==1) and not (longClose[2] or shortClose[2] or longCloseTgt[2] or shortCloseTgt[2]) and ((upFractal==true and bull_ema_index == 3 and tradeState==0) or (dnFractal==true and bear_ema_index == 3 and tradeState==0))
+    cp3 := 1
+    cp4 := 1 // Adding this so its a persistent signal to work with for the breakout signaling process. 
+    longClose := 0 // These are added to ensure close signals are proper w/ potential signal
+    shortClose := 0
+    longCloseTgt := 0
+    shortCloseTgt := 0
+else
+    cp3 := 0
+    
+// When CP3 becomes true we need to make note of a few levels to work with for the Trade Management process. CP4 is waiting for Breakout to occur.
+//  Stop (one tick below low of fractal for bullish setups)
+//  Confirmation Level (Price to confirm breakout of fractal pattern before tripping stop levels)
+//  Potential Entry Level // This would be used for limit orders, not using with this approach. 
+//  Breakeven 1:1 Level (Triggers move stop to scratch) // Not using move stops to BE for this approach 
+//  Target 1 (2:1 Risk/Reward Level)  // Once signaling is stable adjust this closer to 3:1 if possible
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Checkpoint 5 - With CP3&4 equal to 1 we look for price to breakout to confirm the fractal or invalidate the setup by tripping the stop level (cp2, cp3, cp4 == 0). 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Variables and Inputs for Position Sizing
+TradeSizeInXBT = 0.00000
+TradeSizeInXBT := nz(TradeSizeInXBT[1])
+TradeSizeInUSD = 0
+TradeSizeInUSD := nz(TradeSizeInUSD[1])
+
+rr = input(defval=2.25, minval=2.0, title="Risk to Reward Ratio")
+Leverage = input(defval=1, title="Leverage Amount")
+commission = input(title="Estimated Commission", defval=0.2)
+USDRiskPerTrade = input(defval=1, title="USD Risk Per Trade", type=input.integer) // Changing to $1 from $50 for Production
+
+//Set Levels For Potential Setup
+if change(cp4) and cp4==1 and bull_ema_index == 3
+    bull_fractal_sl := valuewhen(upFractal, low[2], 0) - (1*syminfo.mintick)
+    bull_breakout_price := valuewhen(upFractal, high, 0) + (1*syminfo.mintick)
+    entry_buy   := high
+    fractal_dist := bull_breakout_price - bull_fractal_sl
+    fractal_be := bull_breakout_price + (fractal_dist * 1)
+    fractal_tgt := bull_breakout_price + (fractal_dist * rr)
+    tradeState := 1
+    TradeSizeInXBT := USDRiskPerTrade / fractal_dist
+    TradeSizeInUSD := round(bull_breakout_price * TradeSizeInXBT) 
+
+if change(cp4) and cp4==1 and bear_ema_index == 3
+    bear_fractal_sl := valuewhen(dnFractal, high[2], 0) + (1*syminfo.mintick)
+    bear_breakout_price := valuewhen(dnFractal, low, 0) - (1*syminfo.mintick)
+    entry_sell  := low
+    fractal_dist := bear_fractal_sl - bear_breakout_price
+    fractal_be := bear_breakout_price - (fractal_dist * 1)
+    fractal_tgt := bear_breakout_price - (fractal_dist * rr)
+    tradeState := 1
+    TradeSizeInXBT := USDRiskPerTrade / fractal_dist
+    TradeSizeInUSD := round(bear_breakout_price * TradeSizeInXBT)  
+
+if bull_ema_index == 3
+    entry_fill := bull_breakout_price
+if bear_ema_index == 3
+    entry_fill := bear_breakout_price
+    
+//Position Sizing Module Plots//
+// Plot 0
+plot(TradeSizeInUSD, title="TradeSizeInUSD", transp=100) // This will be the q=
+// Plot 1
+plot(USDRiskPerTrade, title="USDRiskPerTrade", transp=100) // Shows risk per trade/loss. Multiply by Risk/Reward for Win estimates
+// Plot 2
+plot(rr, title="rr", transp=100)
+
+//If the stop gets tripped update the Global Variable(s). Also reset CP2-5 to 0. 
+if ((low < bull_fractal_sl) and bull_ema_index == 3 and tradeState==0)
+    bull_fractal_sl := na
+    bull_breakout_price := na
+    entry_buy   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+
+if ((high > bear_fractal_sl) and bear_ema_index == 3 and tradeState==0)
+    bear_fractal_sl := na
+    bear_breakout_price := na
+    entry_sell   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+
+// Define Breakout Signals w/ Persistence // Need to adjust the trending ema's from ==3 to >=2. CP4 requires ==3 so that should be ok. Shouldn't see an instance of needing >=1 but will monitor.  
+if cp4==1 and (high >= bull_breakout_price) and bull_ema_index>=2
+    tradeState := 2
+    cp5 := 1
+
+if cp4==1 and (low <= bear_breakout_price) and bear_ema_index>=2
+    tradeState := 3
+    cp5 := 1
+    
+// message="c=position e=bitmex s=xbtusd t=market ro=1 | e=bitmex s=xbtusd b=long q={{plot(\"TradeSizeInUSD\")}} l=1 t=market") 
+// message="c=position e=bitmex s=xbtusd t=market ro=1 | e=bitmex s=xbtusd b=short q={{plot(\"TradeSizeInUSD\")}} l=1 t=market")
+
+// Alert Signals for Autoview // Similar to above issue modifed ema's to be >=2 vs ==3
+alertcondition((change(cp5) and cp5==1 and bull_ema_index>=2), title= "Entry Buy", message="c=position e=bitmex-testnet s=xbtusd t=market ro=1 | e=bitmex-testnet s=xbtusd b=long q={{plot(\"TradeSizeInUSD\")}} l=1 t=market")
+alertcondition((change(cp5) and cp5==1 and bear_ema_index>=2), title= "Entry Sell", message="c=position e=bitmex-testnet s=xbtusd t=market ro=1 | e=bitmex-testnet s=xbtusd b=short q={{plot(\"TradeSizeInUSD\")}} l=1 t=market")
+
+//Stop tripped prior to breakout with tradeState==1 (waiting for breakout). 
+if ((low < bull_fractal_sl) and tradeState==1)
+    bull_fractal_sl := na
+    bull_breakout_price := na
+    entry_buy   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+
+if ((high > bear_fractal_sl) and tradeState==1)
+    bear_fractal_sl := na
+    bear_breakout_price := na
+    entry_sell   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Checkpoint 6 - Active Trade Modules
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Losing Trade Section
+
+// Stop tripped up while in active trade (tradeState==2 or 3) // This is where trade logging would be added for counters
+if ((low < bull_fractal_sl) and tradeState==2 and not longCloseTgt[1])
+    longClose := 1
+else
+    longClose := 0
+
+if ((high > bear_fractal_sl) and tradeState==3 and not shortCloseTgt[1])
+    shortClose := 1
+else
+    shortClose := 0
+    
+// Plots and Alerts for Long and Short Close From Stop Tripped
+plotshape(change(longClose) and longClose==1?close:na, title="Long Close Loss", color=color.maroon, textcolor=color.white, transp=0, 
+          style=shape.labeldown, location=location.abovebar, size=size.tiny,text="Long\nClose",offset=0)
+plotshape(change(shortClose) and shortClose==1?close:na, title="Short Close Loss", color=color.green, textcolor=color.white, transp=0, 
+          style=shape.labelup, location=location.belowbar, size=size.tiny,text="Short\nClose",offset=0)
+
+alertcondition(change(longClose) and longClose==1, title="Long Close Loss", message="e=bitmex-testnet s=xbtusd c=position t=market ro=1")
+alertcondition(change(shortClose) and shortClose==1, title="Short Close Loss", message="e=bitmex-testnet s=xbtusd c=position t=market ro=1")
+
+// If a trade gets stopped will clean up levels etc on the next candle. Can evaluate removing the [1] syntax but want to ensure close signals are reliable first. 
+if change(longClose[1]) and longClose[1]==1
+    bull_fractal_sl := na
+    bull_breakout_price := na
+    entry_buy   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+    plotLossCounter := plotLossCounter + 1
+
+if change(shortClose[1]) and shortClose[1]==1
+    bear_fractal_sl := na
+    bear_breakout_price := na
+    entry_sell   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+    plotLossCounter := plotLossCounter + 1
+    
+// Winning Trade Section
+
+// Target tripped up while in active trade (tradeState==2 or 3) // This is where trade logging would be added for counters
+if ((high >= fractal_tgt) and tradeState==2 and not longClose[1])
+    longCloseTgt := 1
+else
+    longCloseTgt := 0
+
+if ((low <= fractal_tgt) and tradeState==3 and not shortClose[1])
+    shortCloseTgt := 1
+else
+    shortCloseTgt := 0
+    
+// Plots and Alerts for Long and Short Close From Target Reached
+plotshape(change(longCloseTgt) and longCloseTgt==1?close:na, title="Long Close Win", color=color.maroon, textcolor=color.white, transp=0, 
+          style=shape.labeldown, location=location.abovebar, size=size.tiny,text="Long\nClose",offset=0)
+plotshape(change(shortCloseTgt) and shortCloseTgt==1?close:na, title="Short Close Win", color=color.green, textcolor=color.white, transp=0, 
+          style=shape.labelup, location=location.belowbar, size=size.tiny,text="Short\nClose",offset=0)
+
+alertcondition(change(longCloseTgt) and longCloseTgt==1, title="Long Close Win", message="e=bitmex-testnet s=xbtusd c=position t=market ro=1")
+alertcondition(change(shortCloseTgt) and shortCloseTgt==1, title="Short Close Win", message="e=bitmex-testnet s=xbtusd c=position t=market ro=1")
+
+// If a trade reaches target will clean up levels etc on the next candle. Can evaluate removing the [1] syntax but want to ensure close signals are reliable first. 
+if change(longCloseTgt[1]) and longCloseTgt[1]==1
+    bull_fractal_sl := na
+    bull_breakout_price := na
+    entry_buy   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+    plotWinCounter := plotWinCounter + 1
+
+if change(shortCloseTgt[1]) and shortCloseTgt[1]==1
+    bear_fractal_sl := na
+    bear_breakout_price := na
+    entry_sell   := na
+    entry_fill   := na
+    fractal_dist := na
+    fractal_be := na
+    fractal_tgt := na
+    cp2 := 0
+    cp3 := 0
+    cp4 := 0
+    cp5 := 0
+    cp6 := 0
+    cp7 := 0
+    cp8 := 0
+    tradeState := 0
+    plotWinCounter := plotWinCounter + 1
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Plot Section //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// -- debugs EMA (Checkpoint 1)
+plot(bull_ema_index, title='bull_ema_index', transp=100)
+plot(bear_ema_index, title='bear_ema_index', transp=100)
+
+// plot(long_bbr, title='long_bbr', transp=100)
+// plot(short_bbr, title='short_bbr', transp=100)
+
+// Stoch RSI Plots
+// plot(k, color=color.blue)
+// plot(d, color=color.orange)
+// h0 = hline(80)
+// h1 = hline(20)
+// fill(h0, h1, color=color.purple, transp=80)
+
+// Fractal Plots
+// Plot the fractals as shapes on the chart // Down Arrow above candles // Up Arrow below candles // Added [2] to tradeState to reflect 5 bar fractals. Need to code this better if using 3 bar fractals. 
+plotshape(bear_ema_index == 3 and cp2==1 and dnFractal and tradeState[2]==0, "Down Fractal", style=shape.triangledown, location=location.abovebar, size=size.tiny, offset=-2, color=color.red, transp=25)    
+plotshape(bull_ema_index == 3 and cp2==1 and upFractal and tradeState[2]==0, "Up Fractal", style=shape.triangleup, location=location.belowbar, size=size.tiny, offset=-2, color=color.green, transp=25)
+
+// color candles
+barcolor(colorcandles? candlecolor : na)
+
+plot(tradeState, title='tradeState', transp=100)
+// plot(longClose, title='longClose', transp=100)
+// plot(shortClose, title='shortClose', transp=100)
+// plot(longCloseTgt, title='longCloseTgt', transp=100)
+// plot(shortCloseTgt, title='shortCloseTgt', transp=100)
+
+
+// -- debugs for levels, confirmation, and invalidation conditions
+plot(bull_fractal_sl, "bull_fractal_sl", color=color.red, linewidth=2, style=plot.style_circles, transp=10, join=false, editable=true)
+plot(bear_fractal_sl, "bear_fractal_sl", color=color.red, linewidth=2, style=plot.style_circles, transp=10, join=false, editable=true)
+plot(bull_breakout_price, "bull_breakout_price", color=color.yellow, linewidth=2, style=plot.style_circles, transp=10, join=false, editable=true)
+plot(bear_breakout_price, "bear_breakout_price", color=color.yellow, linewidth=2, style=plot.style_circles, transp=10, join=false, editable=true)
+plot(fractal_tgt, "fractal_tgt", color=color.green, linewidth=2, style=plot.style_circles, transp=10, join=false, editable=true)
+
+// Checkpoint Debugs
+
+// plotshape(bull_ema_index == 3 and cp1==1, "CP1 - bull_ema", shape.circle, location.top, color.green, text = "1", size = size.small)
+// plotshape(bear_ema_index == 3 and cp1==1, "CP1 - bear_ema", shape.circle, location.top, color.red, text = "1", size = size.small)
+
+// plotshape(bull_ema_index == 3 and cp2==1, "CP2 - Long %B/Stoch w/ Trend", shape.diamond, location.top, color.green, text = "2", size = size.tiny)
+// plotshape(bear_ema_index == 3 and cp2==1, "CP2 - Short %B/Stoch w/ Trend", shape.diamond, location.top, color.red, text = "2", size = size.tiny)
+
+// plotshape(upFractal==true and bull_ema_index == 3 and cp2==1, "CP3 - Bull Fractal w/ Trend", shape.circle, location.bottom, color.green, text = "3", size = size.small)
+// plotshape(dnFractal==true and bear_ema_index == 3 and cp2==1, "CP3 - Bear Fractal w/ Trend", shape.circle, location.bottom, color.red, text = "3", size = size.small)
+
+// plot(cp1, title='CP1', transp=100)
+// plot(cp2, title='CP2', transp=100)
+// plot(cp3, title='CP3', transp=100)
+// plot(cp4, title='CP4', transp=100)
+// plot(cp5, title='CP5', transp=100)
+// plot(cp6, title='CP6', transp=100)
+// plot(cp7, title='CP7', transp=100)
+// plot(cp8, title='CP8', transp=100)
+
+// Adjusting this plot signal for ema's being >=2 vs ==3. For CP4 to fire it requires ==3 so this shouldn't affect signals. Key word is "shouldn't" haha
+plotshape((change(cp5) and cp5==1 and bull_ema_index>=2)?close:na, title="Long", color=color.yellow, textcolor=color.green, transp=0, 
+          style=shape.triangleup, location=location.belowbar, size=size.tiny,text="LONG",offset=0)
+          
+plotshape((change(cp5) and cp5==1 and bear_ema_index>=2)?close:na, title="Short", color=color.yellow, textcolor=color.red, transp=0, 
+          style=shape.triangledown, location=location.abovebar, size=size.tiny,text="SHORT",offset=0)
+          
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Win Loss Statistics //
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+StatisticsVerticalOffset = 3.14*atr(14)
+
+if ((longClose[1] and not longClose[2]) or (shortClose[1] and not shortClose[2]) or (longCloseTgt[1] and not longCloseTgt[2]) or (shortCloseTgt[1] and not shortCloseTgt[2]))
+    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + tostring(plotWinCounter) 
+      + "\nLoss : " + tostring(plotLossCounter) + "\nBE : " + tostring(plotBECounter),color = color.white, textcolor=color.white)
+      
+// plot(plotWinCounter, title='plotWinCounter', transp=100)
+// plot(plotLossCounter, title='plotLossCounter', transp=100)
+
+// END //

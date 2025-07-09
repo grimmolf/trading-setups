@@ -1,0 +1,112 @@
+//@version=5
+strategy("Silverstrat", overlay=true)
+
+// Time constraints
+// ### Trading Session 
+
+ts = input.bool(true, title="Show Trade Session")
+
+tz = input.string("America/New_York", title="Timezone", options=["Asia/Tokyo", "Europe/London", "America/New_York"])
+label = input.string("CME Open", title="Label", tooltip="For easy identification")
+
+startHour = input.int(9, title="analysis Start hour")
+startMinute = input.int(0, title="analysis Start minute")
+
+startHour2 = input.int(9, title="Session Start hour")
+startMinute2 = input.int(30, title="Session Start minute")
+endHour2 = input.int(21, title="Session End hour")
+endMinute2 = input.int(0, title="Session End minute")
+
+rangeColor = input.color(color.new(color.green, 90), title="Color")
+
+showMon = input.bool(true, title="Monday")
+showTue = input.bool(true, title="Tuesday")
+showWed = input.bool(true, title="Wednesday")
+showThu = input.bool(true, title="Thursday")
+showFri = input.bool(true, title="Friday")
+showSat = input.bool(false,title="Saturday")
+showSun = input.bool(false,title="Sunday")
+
+tzYear = year(time, tz)
+tzMonth = month(time, tz)
+tzDay = dayofmonth(time, tz)
+tzDayOfWeek = dayofweek(time, tz)
+startTime = timestamp(tz, tzYear, tzMonth, tzDay, startHour, startMinute)
+endTime = timestamp(tz, tzYear, tzMonth, tzDay, endHour2, endMinute2)
+
+is_time_ok = if startTime <= time and time <= endTime and ts
+    if tzDayOfWeek == dayofweek.monday and showMon
+        true
+    else if tzDayOfWeek == dayofweek.tuesday and showTue
+        true
+    else if tzDayOfWeek == dayofweek.wednesday and showWed
+        true
+    else if tzDayOfWeek == dayofweek.thursday and showThu
+        true
+    else if tzDayOfWeek == dayofweek.friday and showFri
+        true
+    else if tzDayOfWeek == dayofweek.saturday and showSat
+        true
+    else if tzDayOfWeek == dayofweek.sunday and showSun
+        true
+    else
+        false
+else
+    false
+
+bgcolor(color=is_time_ok ? rangeColor : na, title = "Session Background")
+
+// Calculate the range from 12 AM to 6 AM, the "Market Session"
+var float rangeHigh = na
+var float rangeLow = na
+if (hour(time) == 0 and minute(time) == 0)
+    rangeHigh := high
+    rangeLow := low
+if (hour(time) < 6)
+    rangeHigh := math.max(rangeHigh, high)
+    rangeLow := math.min(rangeLow, low)
+
+// Calculate 50% levels
+float midRange = (rangeHigh + rangeLow) / 2
+
+
+// Candle pattern
+BullPaint = low > high[2] and is_time_ok
+BearPaint = high < low[2] and is_time_ok
+barcolor(BullPaint ? color.green : BearPaint ? color.red : na, offset=-1)
+
+// Trade setup variables
+var float bullEntryPrice = na
+var float bullStopLoss = na
+var float bullTakeProfit = na
+var float bearEntryPrice = na
+var float bearStopLoss = na
+var float bearTakeProfit = na
+
+// Detect trade setup
+if BullPaint and is_time_ok
+    bullEntryPrice := (high[0] + low[2]) / 2
+    bullStopLoss := low[0]
+    bullTakeProfit := bullEntryPrice + 2 * (bullEntryPrice - bullStopLoss)
+
+if BearPaint and is_time_ok
+    bearEntryPrice := (low[0] + high[2]) / 2
+    bearStopLoss := high[0]
+    bearTakeProfit := bearEntryPrice - 2 * (bearStopLoss - bearEntryPrice)
+
+// Execute trade when price reaches entry level
+if not na(bullEntryPrice) and close[1] <= bullEntryPrice and close => bullEntryPrice
+    strategy.entry("Bullish Entry", strategy.long)
+    strategy.exit("Bullish TP/SL", "Bullish Entry", stop=bullStopLoss, limit=bullTakeProfit)
+    // Reset trade setup
+    bullEntryPrice := na
+    bullStopLoss := na
+    bullTakeProfit := na
+
+if not na(bearEntryPrice) and close[1] >= bearEntryPrice and close =< bearEntryPrice
+    strategy.entry("Bearish Entry", strategy.short)
+    strategy.exit("Bearish TP/SL", "Bearish Entry", stop=bearStopLoss, limit=bearTakeProfit)
+    // Reset trade setup
+    bearEntryPrice := na
+    bearStopLoss := na
+    bearTakeProfit := na

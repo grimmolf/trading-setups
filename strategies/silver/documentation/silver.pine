@@ -1,0 +1,64 @@
+//@version=4
+study(title="Grimm Silver", shorttitle="Silver", overlay=true)
+
+// ### Trading Session 
+
+ts = input(title="Show Trade Session", type=input.bool, defval=true)
+
+tz = input(title="Timezone", type=input.string, defval="America/New_York", options=["Asia/Tokyo", "Europe/London","America/New_York"])
+label = input(title="Label", type=input.string, defval="CME Open", tooltip="For easy identification")
+
+startHour = input(title="analysis Start hour", type=input.integer, defval=9, minval=0, maxval=23)
+startMinute = input(title="analysis Start minute", type=input.integer, defval=00, minval=0, maxval=59)
+
+startHour2 = input(title="Session Start hour", type=input.integer, defval=9, minval=0, maxval=23)
+startMinute2 = input(title="Session Start minute", type=input.integer, defval=30, minval=0, maxval=59)
+endHour2 = input(title="Session End hour", type=input.integer, defval=21, minval=0, maxval=23)
+endMinute2 = input(title="Session End minute", type=input.integer, defval=0, minval=0, maxval=59)
+
+rangeColor = input(title="Color", type=input.color, defval=color.new(color.green, 90))
+
+showMon = input(title="Monday", type=input.bool, defval=true)
+showTue = input(title="Tuesday", type=input.bool, defval=true)
+showWed = input(title="Wednesday", type=input.bool, defval=true)
+showThu = input(title="Thursday", type=input.bool, defval=true)
+showFri = input(title="Friday", type=input.bool, defval=true)
+showSat = input(title="Saturday", type=input.bool, defval=false)
+showSun = input(title="Sunday", type=input.bool, defval=false)
+
+tzYear = year(time, tz)
+tzMonth = month(time, tz)
+tzDay = dayofmonth(time, tz)
+tzDayOfWeek = dayofweek(time, tz)
+startTime = timestamp(tz, tzYear, tzMonth, tzDay, startHour, startMinute)
+endTime = timestamp(tz, tzYear, tzMonth, tzDay, endHour2, endMinute2)
+
+active = if startTime <= time and time <= endTime and ts
+    if tzDayOfWeek == dayofweek.monday and showMon
+        true
+    else if tzDayOfWeek == dayofweek.tuesday and showTue
+        true
+    else if tzDayOfWeek == dayofweek.wednesday and showWed
+        true
+    else if tzDayOfWeek == dayofweek.thursday and showThu
+        true
+    else if tzDayOfWeek == dayofweek.friday and showFri
+        true
+    else if tzDayOfWeek == dayofweek.saturday and showSat
+        true
+    else if tzDayOfWeek == dayofweek.sunday and showSun
+        true
+    else
+        false
+else
+    false
+
+bgcolor(color=active ? rangeColor : na, title = "Session Background")
+
+BullPaint = active and low > high[2] and low > high[2] 
+BearPaint = active and high < low[2] and high < low[2]
+barcolor( BullPaint ? color.green : BearPaint ? color.red :na,offset=-1)
+
+// alerts
+alertcondition(BullPaint, title='Bullish Paint Alert', message='{{ticker}} - Bullish Paint')
+alertcondition(BearPaint, title='Bearish Paint Alert', message='{{ticker}} - Bearish Paint')

@@ -1,0 +1,291 @@
+//@version=4
+//IWBDT Strategy - Trading Strategy
+strategy("IWBDT Strategy", "IWBDT Strategy", overlay=true, max_bars_back=500)
+
+// ################################################################################################################################################################
+// IWBDT Strategy - It Will Break Down/Through
+// Multi-Timeframe Fractal Breakout System with Full Strategy Implementation
+// ################################################################################################################################################################
+
+// Input Parameters
+FirstAddTF = input(title="First additional Timeframe", type=input.resolution, defval="60")
+SecondAddTF = input(title="Second additional Timeframe", type=input.resolution, defval="240")
+ThirdAddTF = input(title="Third additional Timeframe", type=input.resolution, defval="D")
+
+EMA_Short_period = input(defval=9, title="EMA Period Short", type=input.integer)
+EMA_Long_period = input(defval=18, title="EMA Period Long", type=input.integer)
+
+// Risk Management
+rr = input(defval=2, title="Risk Reward Target", type=input.integer)
+USDRiskPerTrade = input(defval=20, title="Fixed risk amount per trade in USD", type=input.integer)
+
+// Strategy Settings
+initialCapital = input(defval=10000, title="Initial Capital", type=input.integer)
+riskPerTrade = input(defval=0.02, title="Risk per trade (% of capital)", type=input.float, minval=0.01, maxval=0.1)
+enableLongTrades = input(defval=true, title="Enable Long Trades", type=input.bool)
+enableShortTrades = input(defval=true, title="Enable Short Trades", type=input.bool)
+
+// Trend Options
+IncludeCT = input(defval=false, title="Include Current Time Frame EMA-cross in trend definition", type=input.bool)
+
+// Visual Settings
+HideBackground = input(defval=false, title="Hide colored background", type=input.bool)
+bgcolorBullTransp = input(defval=55, title="All TF Bull Color Transparency", type=input.integer)
+bgcolorBearTransp = input(defval=55, title="All TF Bear Color Transparency", type=input.integer)
+bgcolorBullPartialTransp = input(defval=70, title="Partial TF Bull Color Transparency", type=input.integer)
+bgcolorBearPartialTransp = input(defval=70, title="Partial TF Bear Color Transparency", type=input.integer)
+
+// Commission
+commission = input(title="Commission per trade (%)", defval=0.1, type=input.float)
+
+// ################################################################################################################################################################
+// Multi-Timeframe Trend Analysis
+// ################################################################################################################################################################
+
+// Get EMA data for all timeframes
+FirstAddTF_ema_short = security(syminfo.tickerid, FirstAddTF, ema(close, EMA_Short_period))
+FirstAddTF_ema_long = security(syminfo.tickerid, FirstAddTF, ema(close, EMA_Long_period))
+SecondAddTF_ema_short = security(syminfo.tickerid, SecondAddTF, ema(close, EMA_Short_period))
+SecondAddTF_ema_long = security(syminfo.tickerid, SecondAddTF, ema(close, EMA_Long_period))
+ThirdAddTF_ema_short = security(syminfo.tickerid, ThirdAddTF, ema(close, EMA_Short_period))
+ThirdAddTF_ema_long = security(syminfo.tickerid, ThirdAddTF, ema(close, EMA_Long_period))
+
+// Current timeframe EMAs
+ctf_ema_short = ema(close, EMA_Short_period)
+ctf_ema_long = ema(close, EMA_Long_period)
+
+// Calculate trend direction for each timeframe
+FirstAddTF_Bull = FirstAddTF_ema_short > FirstAddTF_ema_long ? 1 : 0
+SecondAddTF_Bull = SecondAddTF_ema_short > SecondAddTF_ema_long ? 1 : 0
+ThirdAddTF_Bull = ThirdAddTF_ema_short > ThirdAddTF_ema_long ? 1 : 0
+
+FirstAddTF_Bear = FirstAddTF_ema_short < FirstAddTF_ema_long ? 1 : 0
+SecondAddTF_Bear = SecondAddTF_ema_short < SecondAddTF_ema_long ? 1 : 0
+ThirdAddTF_Bear = ThirdAddTF_ema_short < ThirdAddTF_ema_long ? 1 : 0
+
+// Full trend alignment (3/3 timeframes)
+L_TF_Bull = FirstAddTF_Bull + SecondAddTF_Bull + ThirdAddTF_Bull == 3
+L_TF_Bear = FirstAddTF_Bear + SecondAddTF_Bear + ThirdAddTF_Bear == 3
+
+// Partial trend alignment (2/3 timeframes)
+L_TF_Bull_partial = FirstAddTF_Bull + SecondAddTF_Bull + ThirdAddTF_Bull == 2
+L_TF_Bear_partial = FirstAddTF_Bear + SecondAddTF_Bear + ThirdAddTF_Bear == 2
+
+// Current timeframe trend
+CT_Bull = ctf_ema_short > ctf_ema_long ? 1 : 0
+CT_Bear = ctf_ema_short < ctf_ema_long ? 1 : 0
+
+// All timeframes including current (4/4)
+All_TF_Bull = FirstAddTF_Bull + SecondAddTF_Bull + ThirdAddTF_Bull + CT_Bull == 4
+All_TF_Bear = FirstAddTF_Bear + SecondAddTF_Bear + ThirdAddTF_Bear + CT_Bear == 4
+
+// Final trend determination
+BullTrend = IncludeCT ? All_TF_Bull : L_TF_Bull
+BearTrend = IncludeCT ? All_TF_Bear : L_TF_Bear
+
+// ################################################################################################################################################################
+// ATR-based Risk Management
+// ################################################################################################################################################################
+
+Min_Trade_Risk = atr(14)
+Max_Trade_Risk = 2 * atr(14)
+
+// ################################################################################################################################################################
+// Fractal Detection
+// ################################################################################################################################################################
+
+// Basic fractal patterns
+topfractal = high[3] < high[2] and high[2] > high[1] and BearTrend == true
+botfractal = low[3] > low[2] and low[2] < low[1] and BullTrend == true
+
+// Fractal confirmation with risk filters
+topfractalconfirmed = high[3] < high[2] and high[2] > high[1] and BearTrend == true and 
+                      low < low[1] and strategy.position_size == 0 and 
+                      (high[2] - low[1]) > Min_Trade_Risk and (high[2] - low[1]) < Max_Trade_Risk
+
+botfractalconfirmed = low[3] > low[2] and low[2] < low[1] and BullTrend == true and 
+                      high > high[1] and strategy.position_size == 0 and 
+                      (high[1] - low[2]) > Min_Trade_Risk and (high[1] - low[2]) < Max_Trade_Risk
+
+// ################################################################################################################################################################
+// Position Sizing
+// ################################################################################################################################################################
+
+// Calculate position size based on risk
+calculatePositionSize(entryPrice, stopPrice, riskAmount) =>
+    if na(entryPrice) or na(stopPrice) or entryPrice == stopPrice
+        0
+    else
+        riskPerPoint = abs(entryPrice - stopPrice)
+        positionSize = riskAmount / riskPerPoint
+        positionSize
+
+// Account value for position sizing
+accountValue = strategy.initial_capital + strategy.netprofit
+riskAmount = accountValue * riskPerTrade
+
+// ################################################################################################################################################################
+// Trade Management Variables
+// ################################################################################################################################################################
+
+var float longStopLevel = na
+var float shortStopLevel = na
+var float longTPLevel = na
+var float shortTPLevel = na
+var float longBELevel = na
+var float shortBELevel = na
+var bool longBreakevenActive = false
+var bool shortBreakevenActive = false
+
+// ################################################################################################################################################################
+// Long Trade Logic
+// ################################################################################################################################################################
+
+longEntryCondition = botfractalconfirmed and enableLongTrades and strategy.position_size == 0
+
+if longEntryCondition
+    stopLevel = low[2]
+    entryLevel = close
+    stopDistance = entryLevel - stopLevel
+    tpLevel = entryLevel + (rr * stopDistance)
+    beLevel = entryLevel + stopDistance
+    
+    positionSize = calculatePositionSize(entryLevel, stopLevel, riskAmount)
+    
+    if positionSize > 0
+        strategy.entry("Long", strategy.long, qty=positionSize)
+        longStopLevel := stopLevel
+        longTPLevel := tpLevel
+        longBELevel := beLevel
+        longBreakevenActive := false
+
+// Long breakeven activation
+if strategy.position_size > 0 and not longBreakevenActive and high > longBELevel
+    longBreakevenActive := true
+    strategy.exit("Long BE", "Long", stop=longBELevel)
+
+// Long exits
+if strategy.position_size > 0 and not longBreakevenActive
+    strategy.exit("Long Exit", "Long", stop=longStopLevel, limit=longTPLevel)
+
+// ################################################################################################################################################################
+// Short Trade Logic
+// ################################################################################################################################################################
+
+shortEntryCondition = topfractalconfirmed and enableShortTrades and strategy.position_size == 0
+
+if shortEntryCondition
+    stopLevel = high[2]
+    entryLevel = close
+    stopDistance = stopLevel - entryLevel
+    tpLevel = entryLevel - (rr * stopDistance)
+    beLevel = entryLevel - stopDistance
+    
+    positionSize = calculatePositionSize(entryLevel, stopLevel, riskAmount)
+    
+    if positionSize > 0
+        strategy.entry("Short", strategy.short, qty=positionSize)
+        shortStopLevel := stopLevel
+        shortTPLevel := tpLevel
+        shortBELevel := beLevel
+        shortBreakevenActive := false
+
+// Short breakeven activation
+if strategy.position_size < 0 and not shortBreakevenActive and low < shortBELevel
+    shortBreakevenActive := true
+    strategy.exit("Short BE", "Short", stop=shortBELevel)
+
+// Short exits
+if strategy.position_size < 0 and not shortBreakevenActive
+    strategy.exit("Short Exit", "Short", stop=shortStopLevel, limit=shortTPLevel)
+
+// ################################################################################################################################################################
+// Visualization
+// ################################################################################################################################################################
+
+// Background colors
+BGColorBull = color.green
+BGColorBear = color.red
+BGColorBullPartial = color.teal
+BGColorBearPartial = color.maroon
+
+BGColor0 = BullTrend and not HideBackground ? BGColorBull : na
+BGColor1 = BearTrend and not HideBackground ? BGColorBear : na
+BGColor2 = L_TF_Bull_partial and not HideBackground ? BGColorBullPartial : na
+BGColor3 = L_TF_Bear_partial and not HideBackground ? BGColorBearPartial : na
+
+bgcolor(BGColor0, bgcolorBullTransp)
+bgcolor(BGColor1, bgcolorBearTransp)
+bgcolor(BGColor2, bgcolorBullPartialTransp)
+bgcolor(BGColor3, bgcolorBearPartialTransp)
+
+// Fractal markers
+plotchar(topfractal, char="ˆ", location=location.abovebar, color=color.red, transp=0, offset=-2, size=size.small)
+plotchar(botfractal, char="ˬ", location=location.belowbar, color=color.lime, transp=0, offset=-2, size=size.small)
+
+// Entry confirmation markers
+plotchar(topfractalconfirmed, char="↓", location=location.abovebar, color=color.yellow, transp=0, offset=0, size=size.small)
+plotchar(botfractalconfirmed, char="↑", location=location.belowbar, color=color.white, transp=0, offset=0, size=size.small)
+
+// Trade levels for active positions
+currentStopLevel = strategy.position_size > 0 ? longStopLevel : strategy.position_size < 0 ? shortStopLevel : na
+currentTPLevel = strategy.position_size > 0 ? longTPLevel : strategy.position_size < 0 ? shortTPLevel : na
+currentBELevel = strategy.position_size > 0 ? longBELevel : strategy.position_size < 0 ? shortBELevel : na
+
+plot(currentStopLevel, title="Stop Level", color=color.red, linewidth=2, style=plot.style_line)
+plot(strategy.position_avg_price, title="Entry Level", color=color.white, linewidth=2, style=plot.style_line)
+plot(currentBELevel, title="Breakeven Level", color=color.blue, linewidth=1, style=plot.style_line)
+plot(currentTPLevel, title="TP Level", color=color.green, linewidth=2, style=plot.style_line)
+
+// ################################################################################################################################################################
+// Alerts
+// ################################################################################################################################################################
+
+// Entry alerts
+alertcondition(longEntryCondition, title='IWBDT Long Entry', message='IWBDT Long Entry Signal - Entry: {{close}}, Stop: {{plot_00}}, Target: {{plot_02}}')
+alertcondition(shortEntryCondition, title='IWBDT Short Entry', message='IWBDT Short Entry Signal - Entry: {{close}}, Stop: {{plot_00}}, Target: {{plot_02}}')
+
+// Trend alerts
+alertcondition(BullTrend, title='IWBDT Bull Trend', message='IWBDT Bull Trend Activated')
+alertcondition(BearTrend, title='IWBDT Bear Trend', message='IWBDT Bear Trend Activated')
+
+// ################################################################################################################################################################
+// Performance Information
+// ################################################################################################################################################################
+
+// Calculate performance metrics
+totalTrades = strategy.closedtrades
+winRate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100 : 0
+netProfit = strategy.netprofit
+maxDrawdown = strategy.max_drawdown
+profitFactor = strategy.grossprofit / strategy.grossloss
+
+// Display performance table
+var table perfTable = table.new(position.top_right, 2, 6, bgcolor=color.white, border_width=1)
+if barstate.islast
+    table.cell(perfTable, 0, 0, "Total Trades:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 0, tostring(totalTrades), text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 0, 1, "Win Rate:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 1, tostring(winRate, "#.##") + "%", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 0, 2, "Net Profit:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 2, "$" + tostring(netProfit, "#.##"), text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 0, 3, "Max DD:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 3, "$" + tostring(maxDrawdown, "#.##"), text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 0, 4, "Profit Factor:", text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 1, 4, tostring(profitFactor, "#.##"), text_color=color.black, text_size=size.small)
+    table.cell(perfTable, 0, 5, "Position:", text_color=color.black, text_size=size.small)
+    positionText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    table.cell(perfTable, 1, 5, positionText, text_color=color.black, text_size=size.small)
+
+// Plot EMAs for reference
+plot(ctf_ema_short, title="EMA Short", color=color.blue, linewidth=1, transp=50)
+plot(ctf_ema_long, title="EMA Long", color=color.red, linewidth=1, transp=50)
+
+// Performance summary at the end
+if barstate.islast
+    runtime.error("IWBDT Strategy Performance Summary: " + 
+        "Total Trades: " + str.tostring(totalTrades) + 
+        " | Win Rate: " + str.tostring(winRate, "#.##") + "%" +
+        " | Net Profit: $" + str.tostring(netProfit, "#.##") +
+        " | Max Drawdown: $" + str.tostring(maxDrawdown, "#.##") +
+        " | Profit Factor: " + str.tostring(profitFactor, "#.##"))

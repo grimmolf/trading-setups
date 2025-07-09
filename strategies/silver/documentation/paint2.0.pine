@@ -1,0 +1,148 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © allanster
+
+//@version=5
+indicator(title = "GrimmPaint 2.0 Alerts", shorttitle = "Paint2.0", overlay = true)
+
+BullLabel = "Bullish Paint"
+BearLabel = "Bearish Paint"
+
+BullPaint = low > high[2] and low > high[2] 
+BearPaint = high < low[2] and high < low[2]
+
+// Time filter
+time_1_session = input.session("0700-0900", "Time 1", group="Time Windows")
+time_2_session = input.session("1000-1200", "Time 2", group="Time Windows")
+time_3_session = input.session("", "Time 3", group="Time Windows")
+
+is_time_1 = time(timeframe.period, time_1_session, "America/Los_Angeles")
+is_time_2 = time(timeframe.period, time_2_session, "America/Los_Angeles")
+is_time_3 = time(timeframe.period, time_3_session, "America/Los_Angeles")
+
+inTimeWindow = (not na(is_time_1) or not na(is_time_2) or not na(is_time_3)) and dayofweek != dayofweek.saturday and dayofweek != dayofweek.sunday
+
+// Daily close time at 1pm Pacific
+closeTime = time(timeframe.period, "1300-1301", "America/Los_Angeles")
+shouldClose = not na(closeTime) and dayofweek != dayofweek.saturday and dayofweek != dayofweek.sunday
+
+// Track paint levels and stop levels
+var float bullPaintHigh = na
+var float bullPaintLow = na
+var float bullStopLevel = na
+var bool bullPaintActive = false
+var bool bullPositionOpen = false
+
+var float bearPaintLow = na  
+var float bearPaintHigh = na
+var float bearStopLevel = na
+var bool bearPaintActive = false
+var bool bearPositionOpen = false
+
+// Detect new paint signals and store levels
+if BullPaint and not bullPaintActive
+    bullPaintHigh := high
+    bullPaintLow := low
+    bullStopLevel := low[3]  // Low from 2 bars before the paint candle
+    bullPaintActive := true
+
+if BearPaint and not bearPaintActive
+    bearPaintLow := low
+    bearPaintHigh := high  
+    bearStopLevel := high[3]  // High from 2 bars before the paint candle
+    bearPaintActive := true
+
+// Re-entry conditions
+bullReEntry = bullPaintActive and close > bullPaintLow and close < bullPaintHigh and low <= bullPaintLow
+bearReEntry = bearPaintActive and close < bearPaintHigh and close > bearPaintLow and high >= bearPaintHigh
+
+// Calculate take profit levels (4.6x risk)
+bullTPLevel = bullPaintLow + (bullPaintLow - bullStopLevel) * 4.6
+bearTPLevel = bearPaintHigh - (bearStopLevel - bearPaintHigh) * 4.6
+
+// Entry conditions
+longCondition = bullReEntry and inTimeWindow and not bullPositionOpen and not bearPositionOpen
+shortCondition = bearReEntry and inTimeWindow and not bearPositionOpen and not bullPositionOpen
+
+// Track position openings
+var bool longEntryTriggered = false
+var bool shortEntryTriggered = false
+
+if longCondition and not longEntryTriggered
+    longEntryTriggered := true
+    bullPositionOpen := true
+    bullPaintActive := false
+
+if shortCondition and not shortEntryTriggered
+    shortEntryTriggered := true
+    bearPositionOpen := true
+    bearPaintActive := false
+
+// Check for position exits
+var bool longExitTriggered = false
+var bool shortExitTriggered = false
+
+// Long position exits
+if bullPositionOpen
+    longStopHit = low <= bullStopLevel
+    longTargetHit = high >= bullTPLevel
+    longDailyClose = shouldClose
+    
+    if (longStopHit or longTargetHit or longDailyClose) and not longExitTriggered
+        longExitTriggered := true
+        bullPositionOpen := false
+
+// Short position exits  
+if bearPositionOpen
+    shortStopHit = high >= bearStopLevel
+    shortTargetHit = low <= bearTPLevel
+    shortDailyClose = shouldClose
+    
+    if (shortStopHit or shortTargetHit or shortDailyClose) and not shortExitTriggered
+        shortExitTriggered := true
+        bearPositionOpen := false
+
+// Reset triggers for next bar
+if longEntryTriggered[1]
+    longEntryTriggered := false
+if shortEntryTriggered[1] 
+    shortEntryTriggered := false
+if longExitTriggered[1]
+    longExitTriggered := false
+if shortExitTriggered[1]
+    shortExitTriggered := false
+
+// Reset paint active status when far from levels
+if bullPaintActive and (high > bullPaintHigh * 1.1 or low < bullStopLevel)
+    bullPaintActive := false
+    
+if bearPaintActive and (low < bearPaintLow * 0.9 or high > bearStopLevel)  
+    bearPaintActive := false
+
+// Visual indicators
+barcolor(BullPaint ? color.green : BearPaint ? color.red : na, offset=-1)
+
+// Plot position indicators
+plotshape(longEntryTriggered, title="Long Entry", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.normal, text="LONG")
+plotshape(shortEntryTriggered, title="Short Entry", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.normal, text="SHORT")
+
+// Plot levels for visualization
+plot(bullPaintActive ? bullPaintHigh : na, color=color.green, style=plot.style_line, title="Bull Paint High")
+plot(bullPaintActive ? bullPaintLow : na, color=color.green, style=plot.style_line, title="Bull Paint Low") 
+plot(bullPositionOpen ? bullStopLevel : na, color=color.red, style=plot.style_line, title="Bull Stop")
+plot(bullPositionOpen ? bullTPLevel : na, color=color.blue, style=plot.style_line, title="Bull TP")
+
+plot(bearPaintActive ? bearPaintLow : na, color=color.red, style=plot.style_line, title="Bear Paint Low")
+plot(bearPaintActive ? bearPaintHigh : na, color=color.red, style=plot.style_line, title="Bear Paint High")
+plot(bearPositionOpen ? bearStopLevel : na, color=color.red, style=plot.style_line, title="Bear Stop") 
+plot(bearPositionOpen ? bearTPLevel : na, color=color.blue, style=plot.style_line, title="Bear TP")
+
+// Entry Alerts
+alertcondition(longEntryTriggered, title='Long Entry Alert', message='{{ticker}} - LONG Entry at {{close}}')
+alertcondition(shortEntryTriggered, title='Short Entry Alert', message='{{ticker}} - SHORT Entry at {{close}}')
+
+// Exit Alerts
+alertcondition(longExitTriggered, title='Long Exit Alert', message='{{ticker}} - LONG Exit at {{close}}')
+alertcondition(shortExitTriggered, title='Short Exit Alert', message='{{ticker}} - SHORT Exit at {{close}}')
+
+// Daily Close Alert
+alertcondition(shouldClose, title='Daily Close Alert', message='{{ticker}} - Daily Close 1pm PT at {{close}}')

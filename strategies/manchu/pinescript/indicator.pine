@@ -1,0 +1,946 @@
+//@version=5
+//Manchu Strategy - Indicator
+indicator(title = 'Manchu Strategy Indicator', shorttitle = 'Manchu Indicator', overlay=true)
+
+// ### Trading Session
+
+ts = input.bool(title="Show Trade Session", defval=true, group = "Trade Session")
+
+tz = input.string(title="Timezone", defval="America/Chicago", options=["Asia/Sydney", "Asia/Tokyo", "Europe/Frankfurt", "Europe/London", "UTC", "America/New_York", "America/Chicago"], group = "Trade Session")
+label = input.string(title="Label", defval="CME Open", tooltip="For easy identification", group = "Trade Session")
+
+startHour = input.int(title="analysis Start hour", defval=8, minval=0, maxval=23, group = "Trade Session")
+startMinute = input.int(title="analysis Start minute", defval=30, minval=0, maxval=59, group = "Trade Session")
+
+startHour2 = input.int(title="Session Start hour", defval=8, minval=0, maxval=23, group = "Trade Session")
+startMinute2 = input.int(title="Session Start minute", defval=30, minval=0, maxval=59, group = "Trade Session")
+endHour2 = input.int(title="Session End hour", defval=12, minval=0, maxval=23, group = "Trade Session")
+endMinute2 = input.int(title="Session End minute", defval=0, minval=0, maxval=59, group = "Trade Session")
+
+rangeColor = input.color(title="Color", defval=#1976d21f, group = "Trade Session")
+showMon = input.bool(title="Monday", defval=true, group = "Trade Session")
+showTue = input.bool(title="Tuesday", defval=true, group = "Trade Session")
+showWed = input.bool(title="Wednesday", defval=true, group = "Trade Session")
+showThu = input.bool(title="Thursday", defval=true, group = "Trade Session")
+showFri = input.bool(title="Friday", defval=true, group = "Trade Session")
+showSat = input.bool(title="Saturday", defval=false, group = "Trade Session")
+showSun = input.bool(title="Sunday", defval=false, group = "Trade Session")
+
+tzYear = year(time, tz)
+tzMonth = month(time, tz)
+tzDay = dayofmonth(time, tz)
+tzDayOfWeek = dayofweek(time, tz)
+startTime = timestamp(tz, tzYear, tzMonth, tzDay, startHour, startMinute)
+endTime = timestamp(tz, tzYear, tzMonth, tzDay, endHour2, endMinute2)
+
+active = if startTime <= time and time <= endTime and ts
+    if tzDayOfWeek == dayofweek.monday and showMon
+        true
+    else if tzDayOfWeek == dayofweek.tuesday and showTue
+        true
+    else if tzDayOfWeek == dayofweek.wednesday and showWed
+        true
+    else if tzDayOfWeek == dayofweek.thursday and showThu
+        true
+    else if tzDayOfWeek == dayofweek.friday and showFri
+        true
+    else if tzDayOfWeek == dayofweek.saturday and showSat
+        true
+    else if tzDayOfWeek == dayofweek.sunday and showSun
+        true
+    else
+        false
+else
+    false
+
+bgcolor(color=active ? rangeColor : na, title = "Session Background")
+
+
+startTime2 = timestamp(tz, tzYear, tzMonth, tzDay, startHour2, startMinute2)
+endTime2 = timestamp(tz, tzYear, tzMonth, tzDay, endHour2, endMinute2)
+
+active2 = if startTime2 <= time and time <= endTime2 and ts
+    if tzDayOfWeek == dayofweek.monday and showMon
+        true
+    else if tzDayOfWeek == dayofweek.tuesday and showTue
+        true
+    else if tzDayOfWeek == dayofweek.wednesday and showWed
+        true
+    else if tzDayOfWeek == dayofweek.thursday and showThu
+        true
+    else if tzDayOfWeek == dayofweek.friday and showFri
+        true
+    else if tzDayOfWeek == dayofweek.saturday and showSat
+        true
+    else if tzDayOfWeek == dayofweek.sunday and showSun
+        true
+    else
+        false
+else
+    false
+    
+bgcolor(color=active2 ? rangeColor : na, title = "Session Background")
+
+
+// ### Four Smoothed Moving Averages
+
+len1 = 21
+//input(21, minval=1, title="Length 1", group = "Smoothed MA Inputs")
+src1 = close
+//input(close, title="Source 1", group = "Smoothed MA Inputs")
+smma1 = 0.0
+sma_1 = ta.sma(src1, len1)
+smma1 := na(smma1[1]) ? sma_1 : (smma1[1] * (len1 - 1) + src1) / len1
+plot(smma1, color=color.green, linewidth=2, title="21 SMMA")
+
+len2 = 50
+//input(50, minval=1, title="Length 2", group = "Smoothed MA Inputs")
+src2 = close
+//input(close, title="Source 2", group = "Smoothed MA Inputs")
+smma2 = 0.0
+sma_2 = ta.sma(src2, len2)
+smma2 := na(smma2[1]) ? sma_2 : (smma2[1] * (len2 - 1) + src2) / len2
+plot(smma2, color=color.yellow, linewidth=2, title="50 SMMA")
+
+h100 = input.bool(title="Show 100 Line", defval=true, group = "Smoothed MA Inputs")
+len3 = 100
+//input(100, minval=1, title="Length 3", group = "Smoothed MA Inputs")
+src3 = close
+//input(close, title="Source 3", group = "Smoothed MA Inputs")
+smma3 = 0.0
+sma_3 = ta.sma(src3, len3)
+smma3 := na(smma3[1]) ? sma_3 : (smma3[1] * (len3 - 1) + src3) / len3
+sma3plot = plot(h100 ? smma3 : na, color=color.new(color.white,0), linewidth=2, title="100 SMMA")
+
+len4 = 200
+//input(200, minval=1, title="Length 4", group = "Smoothed MA Inputs")
+src4 = close
+//input(close, title="Source 4", group = "Smoothed MA Inputs")
+smma4 = 0.0
+sma_4 = ta.sma(src4, len4)
+smma4 := na(smma4[1]) ? sma_4 : (smma4[1] * (len4 - 1) + src4) / len4
+sma4plot = plot(smma4, color=color.new(#ff0500,0), linewidth=2, title="200 SMMA")
+
+// Trend Fill
+
+trendFill = input.bool(title="Show Trend Fill", defval=true, group = "Smoothed MA Inputs") 
+ema2 = ta.ema(close, 2)
+ema2plot = plot(ema2, color=#2ecc71, transp=100, style=plot.style_line, linewidth=1, title="EMA(2)", editable = false)
+
+fill(ema2plot, sma4plot, color=ema2 > smma4 and trendFill ? color.green : ema2 < smma4 and trendFill ? color.red : na, transp=85, title = "Trend Fill")
+
+
+//Donchian Channel
+length = input.int(10, minval=1,title="Donchian Length")
+lower = ta.lowest(length)
+upper = ta.highest(length)
+basis = math.avg(upper, lower)
+//plot(basis, "Basis", color=#FF6D00)
+//u = plot(upper, "Upper", color=#2962FF)
+//l = plot(lower, "Lower", color=#2962FF)
+//fill(u, l, color=color.rgb(33, 150, 243, 95), title="Background")
+
+
+
+// WaveTrend
+wtShow = input.bool(true, title = 'Show WaveTrend')
+wtBuyShow = input.bool(true, title = 'Show Buy dots')
+wtGoldShow = input.bool(true, title = 'Show Gold dots')
+wtSellShow = input.bool(true, title = 'Show Sell dots')
+wtDivShow = input.bool(true, title = 'Show Div. dots')
+vwapShow = input.bool(true, title = 'Show Fast WT')
+wtChannelLen = input.int(9, title = 'WT Channel Length')
+wtAverageLen = input.int(12, title = 'WT Average Length')
+wtMASource = input.source(hlc3, title = 'WT MA Source')
+wtMALen = input.int(3, title = 'WT MA Length')
+
+// WaveTrend Overbought & Oversold lines
+obLevel = input.int(53, title = 'WT Overbought Level 1')
+obLevel2 = input.int(60, title = 'WT Overbought Level 2')
+obLevel3 = input.int(100, title = 'WT Overbought Level 3')
+osLevel = input.int(-53, title = 'WT Oversold Level 1')
+osLevel2 = input.int(-60, title = 'WT Oversold Level 2')
+osLevel3 = input.int(-75, title = 'WT Oversold Level 3')
+
+// Divergence WT
+wtShowDiv = input.bool(true, title = 'Show WT Regular Divergences')
+wtShowHiddenDiv = input.bool(false, title = 'Show WT Hidden Divergences')
+showHiddenDiv_nl = input.bool(true, title = 'Not apply OB/OS Limits on Hidden Divergences')
+wtDivOBLevel = input.int(45, title = 'WT Bearish Divergence min')
+wtDivOSLevel = input.int(-65, title = 'WT Bullish Divergence min')
+
+// Divergence extra range
+wtDivOBLevel_addshow = input.bool(true, title = 'Show 2nd WT Regular Divergences')
+wtDivOBLevel_add = input.int(15, title = 'WT 2nd Bearish Divergence')
+wtDivOSLevel_add = input.int(-40, title = 'WT 2nd Bullish Divergence 15 min')
+
+// RSI+MFI
+rsiMFIShow = input.bool(true, title = 'Show MFI')
+rsiMFIperiod = input.int(60,title = 'MFI Period')
+rsiMFIMultiplier = input.float(150, title = 'MFI Area multiplier')
+rsiMFIPosY = input.float(2.5, title = 'MFI Area Y Pos')
+
+// RSI
+rsiShow = input.bool(false, title = 'Show RSI')
+rsiSRC = input.source(close, title = 'RSI Source')
+rsiLen = input.int(14, title = 'RSI Length')
+rsiOversold = input.int(30, title = 'RSI Oversold', minval = 50, maxval = 100)
+rsiOverbought = input.int(60, title = 'RSI Overbought', minval = 0, maxval = 50)
+
+// Divergence RSI
+rsiShowDiv = input.bool(false, title = 'Show RSI Regular Divergences')
+rsiShowHiddenDiv = input.bool(false, title = 'Show RSI Hidden Divergences')
+rsiDivOBLevel = input.int(60, title = 'RSI Bearish Divergence min')
+rsiDivOSLevel = input.int(30, title = 'RSI Bullish Divergence min')
+
+// RSI Stochastic
+stochShow = input.bool(true, title = 'Show Stochastic RSI')
+stochUseLog = input.bool(true, title=' Use Log?')
+stochAvg = input.bool(false, title='Use Average of both K & D')
+stochSRC = input.source(close, title = 'Stochastic RSI Source')
+stochLen = input.int(14, title = 'Stochastic RSI Length')
+stochRsiLen = input.int(14, title = 'RSI Length ')
+stochKSmooth = input.int(3, title = 'Stochastic RSI K Smooth')
+stochDSmooth = input.int(3, title = 'Stochastic RSI D Smooth')
+
+// Divergence stoch
+stochShowDiv = input.bool(false, title = 'Show Stoch Regular Divergences')
+stochShowHiddenDiv = input.bool(false, title = 'Show Stoch Hidden Divergences')
+
+// Schaff Trend Cycle
+tcLine = input.bool(false, title="Show Schaff TC line")
+tcSRC = input.source(close, title = 'Schaff TC Source')
+tclength = input.int(10, title="Schaff TC")
+tcfastLength = input.int(23, title="Schaff TC Fast Lenght")
+tcslowLength = input.int(50, title="Schaff TC Slow Length")
+tcfactor = input.float(0.5, title="Schaff TC Factor")
+
+// Sommi Flag
+sommiFlagShow = input.bool(false, title = 'Show Sommi flag')
+sommiShowVwap = input.bool(false, title = 'Show Sommi F. Wave')
+sommiVwapTF = input.string('720', title = 'Sommi F. Wave timeframe')
+sommiVwapBearLevel = input.int(0, title = 'F. Wave Bear Level (less than)')
+sommiVwapBullLevel = input.int(0, title = 'F. Wave Bull Level (more than)')
+soomiFlagWTBearLevel = input.int(0, title = 'WT Bear Level (more than)')
+soomiFlagWTBullLevel = input.int(0, title = 'WT Bull Level (less than)')
+soomiRSIMFIBearLevel = input.int(0, title = 'Money flow Bear Level (less than)')
+soomiRSIMFIBullLevel = input.int(0, title = 'Money flow Bull Level (more than)')
+
+// Sommi Diamond
+sommiDiamondShow = input.bool(false, title = 'Show Sommi diamond')
+sommiHTCRes = input.string('60', title = 'HTF Candle Res. 1')
+sommiHTCRes2 = input.string('240', title = 'HTF Candle Res. 2')
+soomiDiamondWTBearLevel = input.int(0, title = 'WT Bear Level (More than)')
+soomiDiamondWTBullLevel = input.int(0, title = 'WT Bull Level (Less than)')
+
+// macd Colors
+macdWTColorsShow = input.bool(false, title = 'Show MACD Colors')
+macdWTColorsTF = input.string('240', title = 'MACD Colors MACD TF')
+
+darkMode = input.bool(false, title = 'Dark mode')
+
+
+// Colors
+colorRed = #ff0000
+colorPurple = #e600e6
+colorGreen = #3fff00
+colorOrange = #e2a400
+colorYellow = #ffe500
+colorWhite = #ffffff
+colorPink = #ff00f0
+colorBluelight = #31c0ff
+
+colorWT1 = #90caf9
+colorWT2 = #0d47a1
+
+colorWT2_ = #131722
+
+colormacdWT1a = #4caf58
+colormacdWT1b = #af4c4c
+colormacdWT1c = #7ee57e
+colormacdWT1d = #ff3535
+
+colormacdWT2a = #305630
+colormacdWT2b = #310101
+colormacdWT2c = #132213
+colormacdWT2d = #770000
+
+// FUNCTIONS {
+
+// Divergences
+f_top_fractal(src) => src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]
+f_bot_fractal(src) => src[4] > src[2] and src[3] > src[2] and src[2] < src[1] and src[2] < src[0]
+f_fractalize(src) => f_top_fractal(src) ? 1 : f_bot_fractal(src) ? -1 : 0
+
+f_findDivs(src, topLimit, botLimit, useLimits) =>
+    fractalTop = f_fractalize(src) > 0 and (useLimits ? src[2] >= topLimit : true) ? src[2] : na
+    fractalBot = f_fractalize(src) < 0 and (useLimits ? src[2] <= botLimit : true) ? src[2] : na
+    highPrev = ta.valuewhen(fractalTop, src[2], 0)[2]
+    highPrice = ta.valuewhen(fractalTop, high[2], 0)[2]
+    lowPrev = ta.valuewhen(fractalBot, src[2], 0)[2]
+    lowPrice = ta.valuewhen(fractalBot, low[2], 0)[2]
+    bearSignal = fractalTop and high[2] > highPrice and src[2] < highPrev
+    bullSignal = fractalBot and low[2] < lowPrice and src[2] > lowPrev
+    bearDivHidden = fractalTop and high[2] < highPrice and src[2] > highPrev
+    bullDivHidden = fractalBot and low[2] > lowPrice and src[2] < lowPrev
+    [fractalTop, fractalBot, lowPrev, bearSignal, bullSignal, bearDivHidden, bullDivHidden]
+
+// RSI+MFI
+f_rsimfi(_period, _multiplier, _tf) => request.security(syminfo.tickerid, _tf, ta.sma(((close - open) / (high - low)) * _multiplier, _period) - rsiMFIPosY)
+
+// WaveTrend
+f_wavetrend(src, chlen, avg, malen, tf) =>
+    tfsrc = request.security(syminfo.tickerid, tf, src)
+    esa = ta.ema(tfsrc, chlen)
+    de = ta.ema(math.abs(tfsrc - esa), chlen)
+    ci = (tfsrc - esa) / (0.015 * de)
+    wt1 = request.security(syminfo.tickerid, tf, ta.ema(ci, avg))
+    wt2 = request.security(syminfo.tickerid, tf, ta.sma(wt1, malen))
+    wtVwap = wt1 - wt2
+    wtOversold = wt2 <= osLevel
+    wtOverbought = wt2 >= obLevel
+    wtCross = ta.cross(wt1, wt2)
+    wtCrossUp = wt2 - wt1 <= 0
+    wtCrossDown = wt2 - wt1 >= 0
+    wtCrosslast = ta.cross(wt1[2], wt2[2])
+    wtCrossUplast = wt2[2] - wt1[2] <= 0
+    wtCrossDownlast = wt2[2] - wt1[2] >= 0
+    [wt1, wt2, wtOversold, wtOverbought, wtCross, wtCrossUp, wtCrossDown, wtCrosslast, wtCrossUplast, wtCrossDownlast, wtVwap]
+
+// Schaff Trend Cycle
+f_tc(src, length, fastLength, slowLength) =>
+    ema1 = ta.ema(src, fastLength)
+    ema2 = ta.ema(src, slowLength)
+    macdVal = ema1 - ema2
+    alpha = ta.lowest(macdVal, length)
+    beta = ta.highest(macdVal, length) - alpha
+    gamma = (macdVal - alpha) / beta * 100
+    gamma := beta > 0 ? gamma : nz(gamma[1])
+    delta = gamma
+    delta := na(delta[1]) ? delta : delta[1] + tcfactor * (gamma - delta[1])
+    epsilon = ta.lowest(delta, length)
+    zeta = ta.highest(delta, length) - epsilon
+    eta = (delta - epsilon) / zeta * 100
+    eta := zeta > 0 ? eta : nz(eta[1])
+    stcReturn = eta
+    stcReturn := na(stcReturn[1]) ? stcReturn : stcReturn[1] + tcfactor * (eta - stcReturn[1])
+    stcReturn
+
+// Stochastic RSI
+f_stochrsi(_src, _stochlen, _rsilen, _smoothk, _smoothd, _log, _avg) =>
+    src = _log ? math.log(_src) : _src
+    rsi = ta.rsi(src, _rsilen)
+    kk = ta.sma(ta.stoch(rsi, rsi, rsi, _stochlen), _smoothk)
+    d1 = ta.sma(kk, _smoothd)
+    avg_1 = math.avg(kk, d1)
+    k = _avg ? avg_1 : kk
+    [k, d1]
+
+// MACD
+f_macd(src, fastlen, slowlen, sigsmooth, tf) =>
+    fast_ma = request.security(syminfo.tickerid, tf, ta.ema(src, fastlen))
+    slow_ma = request.security(syminfo.tickerid, tf, ta.ema(src, slowlen))
+    macd = fast_ma - slow_ma,
+    signal = request.security(syminfo.tickerid, tf, ta.sma(macd, sigsmooth))
+    hist = macd - signal
+    [macd, signal, hist]
+
+// MACD Colors on WT
+f_macdWTColors(tf) =>
+    hrsimfi = f_rsimfi(rsiMFIperiod, rsiMFIMultiplier, tf)
+    [macd, signal, hist] = f_macd(close, 28, 42, 9, macdWTColorsTF)
+    macdup = macd >= signal
+    macddown = macd <= signal
+    macdWT1Color = macdup ? hrsimfi > 0 ? colormacdWT1c : colormacdWT1a : macddown ? hrsimfi < 0 ? colormacdWT1d : colormacdWT1b : na
+    macdWT2Color = macdup ? hrsimfi < 0 ? colormacdWT2c : colormacdWT2a : macddown ? hrsimfi < 0 ? colormacdWT2d : colormacdWT2b : na
+    [macdWT1Color, macdWT2Color]
+
+// Get higher timeframe candle
+f_getTFCandle(_tf) =>
+    _open  = request.security(ticker.heikinashi(syminfo.tickerid), _tf, open, barmerge.gaps_off, barmerge.lookahead_on)
+    _close = request.security(ticker.heikinashi(syminfo.tickerid), _tf, close, barmerge.gaps_off, barmerge.lookahead_on)
+    _high  = request.security(ticker.heikinashi(syminfo.tickerid), _tf, high, barmerge.gaps_off, barmerge.lookahead_on)
+    _low   = request.security(ticker.heikinashi(syminfo.tickerid), _tf, low, barmerge.gaps_off, barmerge.lookahead_on)
+    hl2   = (_high + _low) / 2.0
+    newBar = ta.change(_open)
+    candleBodyDir = _close > _open
+    [candleBodyDir, newBar]
+
+// Sommi flag
+f_findSommiFlag(tf, wt1, wt2, rsimfi, wtCross, wtCrossUp, wtCrossDown) =>
+    [hwt1, hwt2, hwtOversold, hwtOverbought, hwtCross, hwtCrossUp, hwtCrossDown, hwtCrosslast, hwtCrossUplast, hwtCrossDownlast, hwtVwap] = f_wavetrend(wtMASource, wtChannelLen, wtAverageLen, wtMALen, tf)
+
+    bearPattern = rsimfi < soomiRSIMFIBearLevel and
+                   wt2 > soomiFlagWTBearLevel and
+                   wtCross and
+                   wtCrossDown and
+                   hwtVwap < sommiVwapBearLevel
+
+    bullPattern = rsimfi > soomiRSIMFIBullLevel and
+                   wt2 < soomiFlagWTBullLevel and
+                   wtCross and
+                   wtCrossUp and
+                   hwtVwap > sommiVwapBullLevel
+
+    [bearPattern, bullPattern, hwtVwap]
+
+f_findSommiDiamond(tf, tf2, wt1, wt2, wtCross, wtCrossUp, wtCrossDown) =>
+    [candleBodyDir, newBar] = f_getTFCandle(tf)
+    [candleBodyDir2, newBar2] = f_getTFCandle(tf2)
+    bearPattern = wt2 >= soomiDiamondWTBearLevel and
+                   wtCross and
+                   wtCrossDown and
+                   not candleBodyDir and
+                   not candleBodyDir2
+    bullPattern = wt2 <= soomiDiamondWTBullLevel and
+                   wtCross and
+                   wtCrossUp and
+                   candleBodyDir and
+                   candleBodyDir2
+    [bearPattern, bullPattern]
+
+// } FUNCTIONS
+
+
+// CALCULATE INDICATORS {
+
+// RSI
+rsi = ta.rsi(rsiSRC, rsiLen)
+rsiColor = rsi <= rsiOversold ? colorGreen : rsi >= rsiOverbought ? colorRed : colorPurple
+
+// RSI + MFI Area
+rsiMFI = f_rsimfi(rsiMFIperiod, rsiMFIMultiplier, timeframe.period)
+rsiMFIColor = rsiMFI > 0 ? #3ee145 : #ff3d2e
+
+// Calculates WaveTrend
+[wt1, wt2, wtOversold, wtOverbought, wtCross, wtCrossUp, wtCrossDown, wtCross_last, wtCrossUp_last, wtCrossDown_last, wtVwap] = f_wavetrend(wtMASource, wtChannelLen, wtAverageLen, wtMALen, timeframe.period)
+
+// Stochastic RSI
+[stochK, stochD] = f_stochrsi(stochSRC, stochLen, stochRsiLen, stochKSmooth, stochDSmooth, stochUseLog, stochAvg)
+
+// Schaff Trend Cycle
+tcVal = f_tc(tcSRC, tclength, tcfastLength, tcslowLength)
+
+// Sommi flag
+[sommiBearish, sommiBullish, hvwap] = f_findSommiFlag(sommiVwapTF, wt1, wt2, rsiMFI, wtCross,  wtCrossUp, wtCrossDown)
+
+//Sommi diamond
+[sommiBearishDiamond, sommiBullishDiamond] = f_findSommiDiamond(sommiHTCRes, sommiHTCRes2, wt1, wt2, wtCross, wtCrossUp, wtCrossDown)
+
+// macd colors
+[macdWT1Color, macdWT2Color] = f_macdWTColors(macdWTColorsTF)
+
+// WT Divergences
+[wtFractalTop, wtFractalBot, wtLow_prev, wtBearDiv, wtBullDiv, wtBearDivHidden, wtBullDivHidden] = f_findDivs(wt2, wtDivOBLevel, wtDivOSLevel, true)
+
+[wtFractalTop_add, wtFractalBot_add, wtLow_prev_add, wtBearDiv_add, wtBullDiv_add, wtBearDivHidden_add, wtBullDivHidden_add] =  f_findDivs(wt2, wtDivOBLevel_add, wtDivOSLevel_add, true)
+[wtFractalTop_nl, wtFractalBot_nl, wtLow_prev_nl, wtBearDiv_nl, wtBullDiv_nl, wtBearDivHidden_nl, wtBullDivHidden_nl] =  f_findDivs(wt2, 0, 0, false)
+
+wtBearDivHidden_ = showHiddenDiv_nl ? wtBearDivHidden_nl : wtBearDivHidden
+wtBullDivHidden_ = showHiddenDiv_nl ? wtBullDivHidden_nl : wtBullDivHidden
+
+wtBearDivColor = (wtShowDiv and wtBearDiv) or (wtShowHiddenDiv and wtBearDivHidden_) ? colorRed : na
+wtBullDivColor = (wtShowDiv and wtBullDiv) or (wtShowHiddenDiv and wtBullDivHidden_) ? colorGreen : na
+
+wtBearDivColor_add = (wtShowDiv and (wtDivOBLevel_addshow and wtBearDiv_add)) or (wtShowHiddenDiv and (wtDivOBLevel_addshow and wtBearDivHidden_add)) ? #9a0202 : na
+wtBullDivColor_add = (wtShowDiv and (wtDivOBLevel_addshow and wtBullDiv_add)) or (wtShowHiddenDiv and (wtDivOBLevel_addshow and wtBullDivHidden_add)) ? #1b5e20 : na
+
+// RSI Divergences
+[rsiFractalTop, rsiFractalBot, rsiLow_prev, rsiBearDiv, rsiBullDiv, rsiBearDivHidden, rsiBullDivHidden] = f_findDivs(rsi, rsiDivOBLevel, rsiDivOSLevel, true)
+[rsiFractalTop_nl, rsiFractalBot_nl, rsiLow_prev_nl, rsiBearDiv_nl, rsiBullDiv_nl, rsiBearDivHidden_nl, rsiBullDivHidden_nl] = f_findDivs(rsi, 0, 0, false)
+
+rsiBearDivHidden_ = showHiddenDiv_nl ? rsiBearDivHidden_nl : rsiBearDivHidden
+rsiBullDivHidden_ = showHiddenDiv_nl ? rsiBullDivHidden_nl : rsiBullDivHidden
+
+rsiBearDivColor = (rsiShowDiv and rsiBearDiv) or (rsiShowHiddenDiv and rsiBearDivHidden_) ? colorRed : na
+rsiBullDivColor = (rsiShowDiv and rsiBullDiv) or (rsiShowHiddenDiv and rsiBullDivHidden_) ? colorGreen : na
+
+// Stoch Divergences
+[stochFractalTop, stochFractalBot, stochLow_prev, stochBearDiv, stochBullDiv, stochBearDivHidden, stochBullDivHidden] = f_findDivs(stochK, 0, 0, false)
+
+stochBearDivColor = (stochShowDiv and stochBearDiv) or (stochShowHiddenDiv and stochBearDivHidden) ? colorRed : na
+stochBullDivColor = (stochShowDiv and stochBullDiv) or (stochShowHiddenDiv and stochBullDivHidden) ? colorGreen : na
+
+
+// Small Circles WT Cross
+signalColor = wt2 - wt1 > 0 ? color.red : color.lime
+
+// Buy signal.
+MbuySignal = wtCross and wtCrossUp and wtOversold
+
+buySignalDiv = (wtShowDiv and wtBullDiv) or
+               (wtShowDiv and wtBullDiv_add) or
+               (stochShowDiv and stochBullDiv) or
+               (rsiShowDiv and rsiBullDiv)
+
+buySignalDiv_color = wtBullDiv ? colorGreen :
+                     wtBullDiv_add ? color.new(colorGreen, 60) :
+                     rsiShowDiv ? colorGreen : na
+
+// Sell signal
+MsellSignal = wtCross and wtCrossDown and wtOverbought
+
+sellSignalDiv = (wtShowDiv and wtBearDiv) or
+               (wtShowDiv and wtBearDiv_add) or
+               (stochShowDiv and stochBearDiv) or
+               (rsiShowDiv and rsiBearDiv)
+
+sellSignalDiv_color = wtBearDiv ? colorRed :
+                     wtBearDiv_add ? color.new(colorRed, 60) :
+                     rsiBearDiv ? colorRed : na
+
+// Gold Buy
+lastRsi = ta.valuewhen(wtFractalBot, rsi[2], 0)[2]
+wtGoldBuy = ((wtShowDiv and wtBullDiv) or (rsiShowDiv and rsiBullDiv)) and
+           wtLow_prev <= osLevel3 and
+           wt2 > osLevel3 and
+           wtLow_prev - wt2 <= -5 and
+           lastRsi < 30
+
+// } CALCULATE INDICATORS
+
+
+// DRAW {
+//bgcolor(darkMode ? color.new(#000000, 80) : na)
+//zLine = plot(0, color = color.new(colorWhite, 50))
+
+//  MFI BAR
+//rsiMfiBarTopLine = plot(rsiMFIShow ? -95 : na, title = 'MFI Bar TOP Line', transp = 100)
+//rsiMfiBarBottomLine = plot(rsiMFIShow ? -99 : na, title = 'MFI Bar BOTTOM Line', transp = 100)
+//fill(rsiMfiBarTopLine, rsiMfiBarBottomLine, title = 'MFI Bar Colors', color = rsiMFIColor, transp = 75)
+
+// WT Areas
+//plot(wtShow ? wt1 : na, style = plot.style_area, title = 'WT Wave 1', color = macdWTColorsShow ? macdWT1Color : colorWT1, transp = 0)
+//plot(wtShow ? wt2 : na, style = plot.style_area, title = 'WT Wave 2', color = macdWTColorsShow ? macdWT2Color : darkMode ? colorWT2_ : colorWT2 , transp = 20)
+
+// VWAP
+//plot(vwapShow ? wtVwap : na, title = 'VWAP', color = colorYellow, style = plot.style_area, linewidth = 2, transp = 45)
+
+// MFI AREA
+//rsiMFIplot = plot(rsiMFIShow ? rsiMFI: na, title = 'RSI+MFI Area', color = rsiMFIColor, transp = 20)
+//fill(rsiMFIplot, zLine, rsiMFIColor, transp = 40)
+
+// WT Div
+//plot(series = wtFractalTop ? wt2[2] : na, title = 'WT Bearish Divergence', color = wtBearDivColor, linewidth = 2, offset = -2)
+//plot(series = wtFractalBot ? wt2[2] : na, title = 'WT Bullish Divergence', color = wtBullDivColor, linewidth = 2, offset = -2)
+
+// WT 2nd Div
+//plot(series = wtFractalTop_add ? wt2[2] : na, title = 'WT 2nd Bearish Divergence', color = wtBearDivColor_add, linewidth = 2, offset = -2)
+//plot(series = wtFractalBot_add ? wt2[2] : na, title = 'WT 2nd Bullish Divergence', color = wtBullDivColor_add, linewidth = 2, offset = -2)
+
+// RSI
+//plot(rsiShow ? rsi : na, title = 'RSI', color = rsiColor, linewidth = 2, transp = 25)
+
+// RSI Div
+//plot(series = rsiFractalTop ? rsi[2] : na, title='RSI Bearish Divergence', color = rsiBearDivColor, linewidth = 1, offset = -2)
+//plot(series = rsiFractalBot ? rsi[2] : na, title='RSI Bullish Divergence', color = rsiBullDivColor, linewidth = 1, offset = -2)
+
+// Stochastic RSI
+//stochKplot = plot(stochShow ? stochK : na, title = 'Stoch K', color = color.new(#21baf3, 0), linewidth = 2)
+//stochDplot = plot(stochShow ? stochD : na, title = 'Stoch D', color = color.new(#673ab7, 60), linewidth = 1)
+//stochFillColor = stochK >= stochD ? color.new(#21baf3, 75) : color.new(#673ab7, 60)
+//fill(stochKplot, stochDplot, title='KD Fill', color=stochFillColor)
+
+// Stoch Div
+//plot(series = stochFractalTop ? stochK[2] : na, title='Stoch Bearish Divergence', color = stochBearDivColor, linewidth = 1, offset = -2)
+//plot(series = stochFractalBot ? stochK[2] : na, title='Stoch Bullish Divergence', color = stochBullDivColor, linewidth = 1, offset = -2)
+
+// Schaff Trend Cycle
+//plot(tcLine ? tcVal : na, color = color.new(#673ab7, 25), linewidth = 2, title = "Schaff Trend Cycle 1")
+//plot(tcLine ? tcVal : na, color = color.new(colorWhite, 50), linewidth = 1, title = "Schaff Trend Cycle 2")
+
+
+
+//alertcondition(MbuySignal, 'Buy (Big green circle)', 'Green circle WaveTrend Oversold')
+//alertcondition(buySignalDiv, 'Buy (Big green circle + Div)', 'Buy & WT Bullish Divergence & WT Overbought')
+//alertcondition(wtGoldBuy, 'GOLD Buy (Big GOLDEN circle)', 'Green & GOLD circle WaveTrend Overbought')
+//alertcondition(sommiBullish or sommiBullishDiamond, 'Sommi bullish flag/diamond', 'Blue flag/diamond')
+//alertcondition(wtCross and wtCrossUp, 'Buy (Small green dot)', 'Buy small circle')
+
+manchulong = wtCross and wtCrossUp
+manchushort = wtCross and wtCrossDown
+
+
+// Buy Signalling
+
+buySignal = ta.change(smma1,4) > 0 and ta.change(smma3,3) > 0 and smma1 > smma2 and smma2 > smma4 and close > smma4 and (low < smma4 or low[1] < smma4[1])
+sellSignal = ta.change(smma1,4) < 0 and ta.change(smma3,360) < 0 and smma1 < smma2 and smma2 < smma4 and close < smma4 and (high > smma4 or high[1] > smma4[1])
+
+// Candle coloring
+barcolor(buySignal ? color.yellow : sellSignal ? color.white :na)
+
+
+
+// Variables for Trade Module
+USDRiskPerTrade = input.int(defval=1, title="Fixed risk amount per trade in USD") // Changing to $1 from $50
+Leverage = input(1)
+Min_Trade_Risk = 2*ta.atr(14)
+Max_Trade_Risk = 4*ta.atr(14)
+StatisticsVerticalOffset = 3*ta.atr(14)
+HideStatistics = input(false)
+DisplayEquityCurve = input(false)
+commission = input(title="Estimated commission per round-turn in USD", defval=0.2)
+riskRewardRatio = input.float(defval=3.0, minval=0.0, title="Risk to Reward 1-to-")
+
+///XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+/// Level definitions:
+///XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+tradeactive = false
+tradeactive := nz(tradeactive[1])
+ 
+ 
+    // STOP Level:
+StopLevel = 0.00000
+StopLevel := nz(StopLevel[1])
+ 
+    // Entry Level:
+EntryLevel = 0.00000
+EntryLevel := nz(EntryLevel[1])
+ 
+    // TP Level:
+TPLevel = 0.00000
+TPLevel := nz(TPLevel[1])
+ 
+    // Breakeven Level:
+BELevel = 0.00000
+BELevel := nz(BELevel[1])
+ 
+    // stopdistance
+stopdistance = 0.00000
+stopdistance := nz(stopdistance[1])
+ 
+    // TradeSizeInXBT
+TradeSizeInXBT = 0.00000
+TradeSizeInXBT := nz(TradeSizeInXBT[1])
+ 
+    // TradeSizeInUSD
+TradeSizeInUSD = 0
+TradeSizeInUSD := nz(TradeSizeInUSD[1])
+ 
+    //PositionMarginXBT
+PositionMarginXBT = 0.00000
+PositionMarginXBT := nz(PositionMarginXBT[1])
+ 
+    //MaxPosMarginXBT
+MaxPosMarginXBT = 0.00000
+MaxPosMarginXBT := nz(MaxPosMarginXBT[1])
+ 
+// Long and Short trade definitions:
+//=============================================================
+Longtradeactive = false
+Longtradeactive := Longtradeactive[1]
+ 
+Shorttradeactive = false
+Shorttradeactive := Shorttradeactive[1]
+
+longCondition = buySignal and session.ismarket
+shortCondition = sellSignal and session.ismarket
+//closelong = halow < min(halow[1],halow[2]) and (TenkanSen max(hahigh[1],hahigh[2]) and (TenkanSen>KijunSen or close>SenkouSpanA or close>KijunSen or close>SenkouSpanL or close>ChikouSpan)
+
+// define plot settings for entry, stoploss and target
+show_order_details = true
+transparency = show_order_details ? 0 : 100
+clr_entry = (longCondition or shortCondition) ? color.white : na
+clr_stoploss = (longCondition or shortCondition) ? color.red : na
+clr_target = (longCondition or shortCondition) ? color.lime : na
+ 
+
+//============================================================
+// Alerts for Trade opening
+//============================================================
+alertcondition(longCondition and not longCondition[1], title='VWAPDev Long', message='{{ticker}} LONG') // Original Code
+alertcondition(shortCondition and not shortCondition[1], title='VWAPDev Short', message="{{ticker}} SHORT") // Original Code
+
+//============================================================
+//Plots for trade signal
+//============================================================
+ 
+Longtradetrigger = if (longCondition[1] and not longCondition[2] and not tradeactive)
+    StopLevel := lower
+    EntryLevel := close[1]
+    TPLevel := EntryLevel + (EntryLevel - StopLevel) * riskRewardRatio
+    BELevel := (EntryLevel - StopLevel) + EntryLevel
+    stopdistance := EntryLevel - StopLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := math.round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+    PositionMarginXBT := (math.round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (math.round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Longtradeactive := true
+
+Shorttradetrigger = if (shortCondition[1] and not shortCondition[2] and not tradeactive)
+    StopLevel := upper
+    EntryLevel := close[1]
+    TPLevel := EntryLevel - (StopLevel - EntryLevel) * riskRewardRatio
+    BELevel := EntryLevel - (StopLevel - EntryLevel)
+    stopdistance := StopLevel - EntryLevel
+    TradeSizeInXBT := USDRiskPerTrade / stopdistance
+    TradeSizeInUSD := math.round(EntryLevel * TradeSizeInXBT)  //remove factor 1000 for live trading
+    PositionMarginXBT := (math.round(100000 * TradeSizeInXBT / Leverage)) / 100000
+    MaxPosMarginXBT := (math.round(100000 * USDRiskPerTrade / Min_Trade_Risk / Leverage)) / 100000
+    tradeactive := true
+    Shorttradeactive := true
+ 
+// PLOT Triggers
+plotshape(Longtradetrigger, title="vwapdevlong", style=shape.triangleup, location=location.belowbar, color=color.lime, text="LONG")
+plotshape(Shorttradetrigger, title="vwapdevshort", style=shape.triangledown, location=location.abovebar, color=color.red, text="SHORT")
+ 
+
+// Plot Levels:
+
+//with breakeven
+//pl1 = plot (StopLevel, title = "Stop", color=color.red)
+//pl2 = plot (EntryLevel, title = "Entry", color=color.white)
+//pl3 = plot (BELevel, title = "BE", color=color.blue)
+//pl4 = plot (TPLevel, title = "TP", color=color.green)
+
+
+//fill(pl1, pl2, color=color.red, transp=65)
+//fill(pl2, pl3, color=color.blue, transp=65)
+//fill(pl3, pl4, color=color.green, transp=65)
+
+//without break even
+pl1 = plot (StopLevel, title = "Stop", color=color.red)
+pl2 = plot (EntryLevel, title = "Entry", color=color.white)
+pl4 = plot (TPLevel, title = "TP", color=color.green)
+
+
+fill(pl1, pl2, color=color.red, transp=65)
+fill(pl2, pl4, color=color.green, transp=65)
+
+
+ //XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Define and plot conflicting candles:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+   
+// Subtypes of conflicting bars:
+//-------------------------------------------------------------------------------------------------------
+ 
+// Bartype 3a is a candle which crosses both BELevel and EntryLevel and has its close above the midline between BELevel and EntryLevel (longs)
+// respecively has its close below the midline between BELevel and EntryLevel (shorts)
+// In case of a Bartype 3a the logic shall NOT consider a trade as closed as break-even, but shall assume trade continuation with activated break-even-flag.
+//-------------------------------------------------------------------------------------------------------
+ 
+Bartype3_a_long = high > BELevel and high < TPLevel and low < EntryLevel and low > StopLevel and close > ((BELevel + EntryLevel)/2) and Longtradeactive
+Bartype3_a_short = high > EntryLevel and high  < StopLevel and low < BELevel and low > TPLevel and close < ((BELevel + EntryLevel)/2) and Shorttradeactive
+//barcolor(Bartype3_a_long or Bartype3_a_short? color.purple : na)
+ 
+//Bartype3_a_Counter = 0    
+//Bartype3_a_Counter := nz(Bartype3_a_Counter[1])
+//if Bartype3_a_long or Bartype3_a_short
+//    Bartype3_a_Counter := Bartype3_a_Counter + 1
+ 
+// Bartype 4a is a candle which crosses TPLevel, BELevel and EntryLevel and has its close above BELevel (longs) respectively close below BELevel (shorts)
+// In case of a Bartype 4a the logic shall consider a trade as closed winner and shall not assume trade as closed break-even.
+//-------------------------------------------------------------------------------------------------------
+ 
+Bartype4_a_long = high > TPLevel and low < EntryLevel and low > StopLevel and close > BELevel and Longtradeactive
+Bartype4_a_short = high > EntryLevel and high < StopLevel and low < TPLevel and close < BELevel and Shorttradeactive
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade resolution:
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+//Target adjustment
+//shorttpadjust = if((Shorttradeactive == true) and crossover(close,lower) and close < EntryLevel-1)
+//    y = 1
+
+//if shorttpadjust == true
+//    TPLevel := close
+
+//longtpadjust = if((Longtradeactive == true) and crossunder(close,upper) and close > EntryLevel+1)
+//    r = 1
+
+//if longtpadjust == true
+//    TPLevel := close
+
+// Stop Adjustment
+
+//shortstopleveladjust = if((Shorttradeactive == true) and (kupper < StopLevel))
+//    y = 1
+
+//if shortstopleveladjust == true
+//    StopLevel := kupper
+
+//longstopleveladjust = if((Longtradeactive == true) and (klower > StopLevel))
+//    r = 1
+
+//if longstopleveladjust == true
+//    StopLevel := klower
+
+
+// Breakeven activation
+//-------------------------------------------------------------------------------------------------------
+shorttradeBElevelactivation = (low < BELevel) and not (low < TPLevel)
+longtradeBElevelactivation = (high > BELevel) and not (high> TPLevel)
+ 
+Breakevenactive = false
+Breakevenactive := nz(Breakevenactive[1])
+ 
+//comment out if removing break-even
+
+//if ((Shorttradeactive ==  true) and (shorttradeBElevelactivation == true))
+//    Breakevenactive := true
+ 
+//if ((Longtradeactive == true) and (longtradeBElevelactivation == true))
+//    Breakevenactive := true
+   
+// loss trades
+//-------------------------------------------------------------------------------------------------------
+ 
+PlotLossCounter = 0
+LossShort = 0
+LossLong = 0
+ 
+PlotLossCounter := nz(PlotLossCounter[1])
+LossShort := nz(LossShort[1])
+LossLong := nz(LossLong[1])
+ 
+plotlosshort = if ((Shorttradeactive == true) and (high > StopLevel) and (Breakevenactive == false))
+    y = 1 // only required to make code work
+ 
+plotchar(plotlosshort, char="X", location=location.abovebar, color=color.red, transp=0, offset=0, size=size.small)
+ 
+if plotlosshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    LossShort := LossShort +1
+ 
+   
+//plotlosshort := false
+ 
+plotlosslong = if ((Longtradeactive == true) and (low < StopLevel) and (Breakevenactive == false))
+    r = 1 // only required to make code work
+   
+plotchar(plotlosslong, char="X", location=location.belowbar, color=color.red, transp=0, offset=0, size=size.small)
+ 
+if plotlosslong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotLossCounter := PlotLossCounter + 1
+    LossLong := LossLong + 1
+   
+//plotlosslong := false
+ 
+// Breakeven trades
+//-------------------------------------------------------------------------------------------------------
+ 
+PlotBreakEvenCounter = 0
+PlotBreakEvenCounter := nz(PlotBreakEvenCounter[1])
+BELong = 0
+BELong := nz(BELong[1])
+BEShort = 0
+BEShort := nz(BEShort[1])
+ 
+plotBreakevenshort = if ((Shorttradeactive ==  true) and (high > EntryLevel) and (Breakevenactive == true) and not Bartype3_a_short and not Bartype4_a_short)
+    h = 1 // only required to make code work
+   
+plotchar(plotBreakevenshort, char="0", location=location.abovebar, color=color.blue, transp=0, offset=0, size=size.small)
+ 
+if plotBreakevenshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotBreakEvenCounter := PlotBreakEvenCounter + 1
+    BEShort := BEShort +1
+ 
+//plotBreakevenshort := false
+ 
+plotBreakevenlong = if ((Longtradeactive ==  true) and (low < EntryLevel) and (Breakevenactive == true) and not Bartype3_a_long and not Bartype4_a_long)
+    e = 1 // only required to make code work
+   
+plotchar(plotBreakevenlong, char="0", location=location.belowbar, color=color.blue, transp=0, offset=0, size=size.small)
+ 
+if plotBreakevenlong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotBreakEvenCounter := PlotBreakEvenCounter + 1
+    BELong := BELong +1
+   
+//plotBreakevenlong := false
+ 
+// Win trades
+//-------------------------------------------------------------------------------------------------------
+PlotWinCounter = 0
+PlotWinCounter := nz(PlotWinCounter[1])
+WinLong = 0
+WinLong := nz(WinLong[1])
+WinShort = 0
+WinShort := nz(WinShort[1])
+ 
+plotWinshort = if ((Shorttradeactive ==  true) and (low < TPLevel))
+    n = 1  // only required to make code work
+ 
+plotchar(plotWinshort, char="✓", location=location.belowbar, color=color.green, transp=0, offset=0, size=size.small)
+ 
+if plotWinshort == true
+    tradeactive := false
+    Shorttradeactive := false
+    Breakevenactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    WinShort := WinShort +1
+   
+//plotWinshort := false
+ 
+plotWinlong = if ((Longtradeactive ==  true) and (high > TPLevel))
+    l = 1 // only required to make code work
+ 
+plotchar(plotWinlong, char="✓", location=location.abovebar, color=color.green, transp=0, offset=0, size=size.small)
+ 
+if plotWinlong == true
+    tradeactive := false
+    Longtradeactive := false
+    Breakevenactive := false
+    PlotWinCounter := PlotWinCounter + 1
+    WinLong := WinLong +1
+   
+//plotWinlong := false
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Trade closing signals
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+// c=position e=bitmex-testnet t=market ro=1
+// Original Code Below
+// alertcondition(plotlosshort or plotlosslong or plotBreakevenshort or plotBreakevenlong, title='Lemon Close Trade BE or Stop', message='Lemon Close at BE or Stop')
+// alertcondition(plotWinshort or plotWinlong, title='Lemon Close Trade Win', message='Lemon Win')
+ 
+alertcondition(plotlosshort or plotlosslong or plotBreakevenshort or plotBreakevenlong, title='VWAPDev Close Trade BE or Stop', message="{{ticker}} Close")
+alertcondition(plotWinshort or plotWinlong, title='VWAPDev Close Trade Win', message="{{ticker}} Take Profit")
+ 
+EquityCurve = PlotWinCounter * 2 * USDRiskPerTrade - PlotLossCounter * USDRiskPerTrade - (PlotWinCounter + PlotLossCounter + PlotBreakEvenCounter) * commission
+ 
+ 
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Statistics
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+ 
+//if (plotWinlong or plotWinshort or plotBreakevenlong or plotBreakevenshort or plotlosslong or plotlosshort) and not HideStatistics
+//    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + tostring(PlotWinCounter)
+//      + "\nLoss : " + tostring(PlotLossCounter) + "\nBE : " + tostring(PlotBreakEvenCounter),color = color.white, textcolor=color.white)
+ 
+winpercent = math.round((PlotWinCounter/(PlotWinCounter+PlotLossCounter+PlotBreakEvenCounter)*100))
+losspercent = math.round((PlotLossCounter/(PlotWinCounter+PlotLossCounter+PlotBreakEvenCounter)*100))
+bepercent = math.round((PlotBreakEvenCounter/(PlotWinCounter+PlotLossCounter+PlotBreakEvenCounter)*100))
+rrpercent = math.round((PlotWinCounter/(PlotWinCounter+PlotLossCounter))*100)
+ 
+//if (plotWinlong or plotWinshort or plotBreakevenlong or plotBreakevenshort or plotlosslong or plotlosshort) and not HideStatistics
+//    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + tostring(PlotWinCounter) + " ("+ tostring(winpercent)+")% Long: " +tostring(WinLong) +" Short: "+ tostring(WinShort)
+//      + "\nLoss : " + tostring(PlotLossCounter) +" ("+tostring(losspercent)+")%"+" Long: "+tostring(LossLong)+" Short: "+tostring(LossShort)+"\nBE : " + tostring(PlotBreakEvenCounter)+" ("+ tostring(bepercent)+")% Long: "+tostring(BELong)+" Short: "+tostring(BEShort),color = color.white, textcolor=color.white)
+
+if (plotWinlong or plotWinshort or plotBreakevenlong or plotBreakevenshort or plotlosslong or plotlosshort) and not HideStatistics
+    l = label.new(bar_index, high + StatisticsVerticalOffset, style=label.style_none, text="Win : " + str.tostring(PlotWinCounter) + " ("+ str.tostring(winpercent)+"%)"
+      + "\nLoss : " + str.tostring(PlotLossCounter) +" ("+str.tostring(losspercent)+"%)" + "\nBE : " + str.tostring(PlotBreakEvenCounter)+" ("+ str.tostring(bepercent)+"%)" + "\nRate : " + str.tostring (rrpercent)+"%)",color = color.white, textcolor=color.white)
+      
+
+// The following line is in order to print the equity curve:
+//-------------------------------------------------------------------------------------------------------
+ 
+plot (DisplayEquityCurve == true ? EquityCurve : na, title = "Profit and Loss", color=color.yellow, linewidth=3, style=plot.style_line)

@@ -1,0 +1,313 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © trading-setups
+
+//@version=5
+indicator(title="Polish Setup Indicator", shorttitle="Polish", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// INPUT PARAMETERS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Smoothed Moving Average Settings
+smma_fast_period = input.int(21, title="Fast SMMA Period", minval=1, group="Moving Averages")
+smma_medium_period = input.int(50, title="Medium SMMA Period", minval=1, group="Moving Averages")
+smma_slow_period = input.int(200, title="Slow SMMA Period", minval=1, group="Moving Averages")
+
+// Pattern Recognition Settings
+pattern_lookback = input.int(7, title="Pattern Lookback Period", minval=3, maxval=20, group="Pattern Recognition")
+pattern_similarity = input.float(2.0, title="Pattern Similarity %", minval=0.5, maxval=5.0, group="Pattern Recognition")
+require_volume_confirmation = input.bool(true, title="Require Volume Confirmation", group="Pattern Recognition")
+
+// RSI Settings
+rsi_period = input.int(14, title="RSI Period", minval=2, maxval=50, group="Momentum")
+rsi_midline = input.int(50, title="RSI Midline", minval=30, maxval=70, group="Momentum")
+
+// Extension Levels
+extension_primary = input.float(4.669, title="Primary Extension Level", minval=1.0, maxval=10.0, group="Targets")
+extension_secondary = input.float(2.618, title="Secondary Extension Level", minval=1.0, maxval=5.0, group="Targets")
+
+// Trading Session
+session_start_hour = input.int(8, title="Session Start Hour", minval=0, maxval=23, group="Trading Session")
+session_start_minute = input.int(30, title="Session Start Minute", minval=0, maxval=59, group="Trading Session")
+session_end_hour = input.int(12, title="Session End Hour", minval=0, maxval=23, group="Trading Session")
+session_end_minute = input.int(0, title="Session End Minute", minval=0, maxval=59, group="Trading Session")
+session_timezone = input.string("America/Chicago", title="Timezone", options=["America/New_York", "America/Chicago", "Europe/London", "Asia/Tokyo"], group="Trading Session")
+
+// Visual Settings
+show_ma_stack = input.bool(true, title="Show Moving Average Stack", group="Display")
+show_patterns = input.bool(true, title="Show W/M Patterns", group="Display")
+show_signals = input.bool(true, title="Show Entry Signals", group="Display")
+show_targets = input.bool(true, title="Show Extension Targets", group="Display")
+show_session = input.bool(true, title="Show Trading Session", group="Display")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// SMOOTHED MOVING AVERAGE CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Smoothed Moving Average (SMMA) function
+smma(src, length) =>
+    var float smma_val = na
+    smma_val := na(smma_val[1]) ? ta.sma(src, length) : (smma_val[1] * (length - 1) + src) / length
+    smma_val
+
+// Calculate smoothed moving averages
+smma_fast = smma(close, smma_fast_period)
+smma_medium = smma(close, smma_medium_period)
+smma_slow = smma(close, smma_slow_period)
+
+// Moving average stack conditions
+bullish_stack = smma_fast > smma_medium and smma_medium > smma_slow
+bearish_stack = smma_fast < smma_medium and smma_medium < smma_slow
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// TRADING SESSION DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Current time in specified timezone
+current_time = time(timeframe.period, session_timezone)
+session_start_time = timestamp(session_timezone, year, month, dayofmonth, session_start_hour, session_start_minute)
+session_end_time = timestamp(session_timezone, year, month, dayofmonth, session_end_hour, session_end_minute)
+
+// Check if current time is within trading session
+in_session = current_time >= session_start_time and current_time <= session_end_time and dayofweek != dayofweek.saturday and dayofweek != dayofweek.sunday
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PATTERN DETECTION FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// W Pattern Detection (Double Bottom)
+detect_w_pattern() =>
+    var float left_low = na
+    var float right_low = na
+    var float middle_high = na
+    var int pattern_bars = 0
+    
+    // Look for potential W pattern
+    for i = 2 to pattern_lookback
+        if low[i] <= low[i-1] and low[i] <= low[i+1]  // Local low
+            if na(left_low)
+                left_low := low[i]
+                pattern_bars := i
+            else if na(right_low) and i > pattern_bars + 2
+                right_low := low[i]
+                // Find highest point between lows
+                for j = i to pattern_bars
+                    if na(middle_high) or high[j] > middle_high
+                        middle_high := high[j]
+                break
+    
+    // Validate W pattern
+    pattern_valid = false
+    if not na(left_low) and not na(right_low) and not na(middle_high)
+        similarity = math.abs(left_low - right_low) / left_low * 100
+        higher_middle = middle_high > math.max(left_low, right_low)
+        breakout = close > middle_high
+        pattern_valid := similarity <= pattern_similarity and higher_middle and breakout
+    
+    // Volume confirmation
+    volume_confirmed = true
+    if require_volume_confirmation
+        avg_volume = ta.sma(volume, 20)
+        volume_confirmed := volume > avg_volume
+    
+    [pattern_valid and volume_confirmed, left_low, right_low, middle_high]
+
+// M Pattern Detection (Double Top)
+detect_m_pattern() =>
+    var float left_high = na
+    var float right_high = na
+    var float middle_low = na
+    var int pattern_bars = 0
+    
+    // Look for potential M pattern
+    for i = 2 to pattern_lookback
+        if high[i] >= high[i-1] and high[i] >= high[i+1]  // Local high
+            if na(left_high)
+                left_high := high[i]
+                pattern_bars := i
+            else if na(right_high) and i > pattern_bars + 2
+                right_high := high[i]
+                // Find lowest point between highs
+                for j = i to pattern_bars
+                    if na(middle_low) or low[j] < middle_low
+                        middle_low := low[j]
+                break
+    
+    // Validate M pattern
+    pattern_valid = false
+    if not na(left_high) and not na(right_high) and not na(middle_low)
+        similarity = math.abs(left_high - right_high) / left_high * 100
+        lower_middle = middle_low < math.min(left_high, right_high)
+        breakdown = close < middle_low
+        pattern_valid := similarity <= pattern_similarity and lower_middle and breakdown
+    
+    // Volume confirmation
+    volume_confirmed = true
+    if require_volume_confirmation
+        avg_volume = ta.sma(volume, 20)
+        volume_confirmed := volume > avg_volume
+    
+    [pattern_valid and volume_confirmed, left_high, right_high, middle_low]
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// MOMENTUM ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// RSI calculation
+rsi_value = ta.rsi(close, rsi_period)
+
+// Momentum conditions
+bullish_momentum = rsi_value >= rsi_midline
+bearish_momentum = rsi_value <= rsi_midline
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// STRUCTURE ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Pattern detection
+[w_pattern_detected, w_left_low, w_right_low, w_middle_high] = detect_w_pattern()
+[m_pattern_detected, m_left_high, m_right_high, m_middle_low] = detect_m_pattern()
+
+// Pullback conditions
+bullish_pullback = close > smma_slow and (low <= smma_medium or low[1] <= smma_medium[1])
+bearish_pullback = close < smma_slow and (high >= smma_medium or high[1] >= smma_medium[1])
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// ENTRY SIGNAL GENERATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Bullish Polish Setup
+bullish_setup = in_session and bullish_stack and (w_pattern_detected or bullish_momentum) and bullish_pullback
+
+// Bearish Polish Setup
+bearish_setup = in_session and bearish_stack and (m_pattern_detected or bearish_momentum) and bearish_pullback
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// PROFIT TARGET CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate extension targets for W pattern
+var float w_primary_target = na
+var float w_secondary_target = na
+if w_pattern_detected
+    pattern_height = w_middle_high - math.min(w_left_low, w_right_low)
+    w_secondary_target := w_middle_high + (pattern_height * extension_secondary)
+    w_primary_target := w_middle_high + (pattern_height * extension_primary)
+
+// Calculate extension targets for M pattern
+var float m_primary_target = na
+var float m_secondary_target = na
+if m_pattern_detected
+    pattern_height = math.max(m_left_high, m_right_high) - m_middle_low
+    m_secondary_target := m_middle_low - (pattern_height * extension_secondary)
+    m_primary_target := m_middle_low - (pattern_height * extension_primary)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// STOP LOSS CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Calculate stop losses
+atr_value = ta.atr(14)
+bullish_stop = ta.lowest(low, 3) - (atr_value * 0.5)
+bearish_stop = ta.highest(high, 3) + (atr_value * 0.5)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// VISUAL ELEMENTS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Plot smoothed moving averages
+plot(show_ma_stack ? smma_fast : na, title="Fast SMMA", color=color.green, linewidth=2)
+plot(show_ma_stack ? smma_medium : na, title="Medium SMMA", color=color.yellow, linewidth=2)
+plot(show_ma_stack ? smma_slow : na, title="Slow SMMA", color=color.red, linewidth=2)
+
+// Moving average stack background
+bgcolor(show_ma_stack and bullish_stack ? color.new(color.green, 95) : show_ma_stack and bearish_stack ? color.new(color.red, 95) : na, title="MA Stack Background")
+
+// Trading session background
+bgcolor(show_session and in_session ? color.new(color.blue, 98) : na, title="Trading Session")
+
+// Pattern signals
+plotshape(show_patterns and w_pattern_detected, title="W Pattern", location=location.belowbar, color=color.green, style=shape.labelup, text="W", size=size.small)
+plotshape(show_patterns and m_pattern_detected, title="M Pattern", location=location.abovebar, color=color.red, style=shape.labeldown, text="M", size=size.small)
+
+// Entry signals
+plotshape(show_signals and bullish_setup, title="Bullish Polish Setup", location=location.belowbar, color=color.lime, style=shape.triangleup, text="POLISH\nBULL", size=size.normal)
+plotshape(show_signals and bearish_setup, title="Bearish Polish Setup", location=location.abovebar, color=color.red, style=shape.triangledown, text="POLISH\nBEAR", size=size.normal)
+
+// Extension targets
+plot(show_targets and bullish_setup and not na(w_secondary_target) ? w_secondary_target : na, title="Bull Secondary Target", color=color.lime, linewidth=1, style=plot.style_circles)
+plot(show_targets and bullish_setup and not na(w_primary_target) ? w_primary_target : na, title="Bull Primary Target", color=color.green, linewidth=2, style=plot.style_circles)
+plot(show_targets and bearish_setup and not na(m_secondary_target) ? m_secondary_target : na, title="Bear Secondary Target", color=color.orange, linewidth=1, style=plot.style_circles)
+plot(show_targets and bearish_setup and not na(m_primary_target) ? m_primary_target : na, title="Bear Primary Target", color=color.red, linewidth=2, style=plot.style_circles)
+
+// Stop loss levels
+plot(show_targets and bullish_setup ? bullish_stop : na, title="Bull Stop Loss", color=color.red, linewidth=1, style=plot.style_cross)
+plot(show_targets and bearish_setup ? bearish_stop : na, title="Bear Stop Loss", color=color.red, linewidth=1, style=plot.style_cross)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Setup alerts
+alertcondition(bullish_setup, title="Bullish Polish Setup", message="{{ticker}} - Bullish Polish Setup at {{close}}")
+alertcondition(bearish_setup, title="Bearish Polish Setup", message="{{ticker}} - Bearish Polish Setup at {{close}}")
+
+// Component alerts
+alertcondition(w_pattern_detected, title="W Pattern Detected", message="{{ticker}} - W Pattern detected")
+alertcondition(m_pattern_detected, title="M Pattern Detected", message="{{ticker}} - M Pattern detected")
+alertcondition(bullish_stack, title="Bullish MA Stack", message="{{ticker}} - Bullish moving average stack formed")
+alertcondition(bearish_stack, title="Bearish MA Stack", message="{{ticker}} - Bearish moving average stack formed")
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// LABELS AND STATUS
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Current stack status
+stack_status = bullish_stack ? "BULLISH STACK" : bearish_stack ? "BEARISH STACK" : "NEUTRAL"
+stack_color = bullish_stack ? color.green : bearish_stack ? color.red : color.gray
+
+// Session status
+session_status = in_session ? "IN SESSION" : "OUT OF SESSION"
+session_color = in_session ? color.yellow : color.gray
+
+// RSI status
+rsi_status = "RSI: " + str.tostring(math.round(rsi_value, 1))
+rsi_color = bullish_momentum ? color.green : bearish_momentum ? color.red : color.gray
+
+// Add labels
+if barstate.islast
+    label.new(bar_index, high + (atr_value * 2), text=stack_status, color=stack_color, textcolor=color.white, style=label.style_label_down, size=size.small)
+    label.new(bar_index, high + (atr_value * 1), text=session_status, color=session_color, textcolor=color.white, style=label.style_label_down, size=size.small)
+    label.new(bar_index, high + (atr_value * 0), text=rsi_status, color=rsi_color, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// Current setup status
+if bullish_setup
+    label.new(bar_index, low - (atr_value * 1), text="BULLISH POLISH SETUP", color=color.lime, textcolor=color.white, style=label.style_label_up, size=size.normal)
+if bearish_setup
+    label.new(bar_index, high + (atr_value * 1), text="BEARISH POLISH SETUP", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.normal)
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// TABLE DISPLAY
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// Create information table
+if barstate.islast
+    var table info_table = table.new(position.top_right, 2, 6, bgcolor=color.white, border_width=1)
+    
+    table.cell(info_table, 0, 0, text="Component", bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 0, text="Status", bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 1, text="Session", bgcolor=color.white, text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 1, text=session_status, bgcolor=session_color, text_color=color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 2, text="MA Stack", bgcolor=color.white, text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 2, text=stack_status, bgcolor=stack_color, text_color=color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 3, text="RSI", bgcolor=color.white, text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 3, text=str.tostring(math.round(rsi_value, 1)), bgcolor=rsi_color, text_color=color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 4, text="W Pattern", bgcolor=color.white, text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 4, text=w_pattern_detected ? "DETECTED" : "NONE", bgcolor=w_pattern_detected ? color.green : color.gray, text_color=color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 5, text="M Pattern", bgcolor=color.white, text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 5, text=m_pattern_detected ? "DETECTED" : "NONE", bgcolor=m_pattern_detected ? color.red : color.gray, text_color=color.white, text_size=size.small)
