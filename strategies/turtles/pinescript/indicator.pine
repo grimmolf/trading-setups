@@ -1,0 +1,69 @@
+//@version=5
+indicator(title="Turtle Trading System", shorttitle="Turtle", overlay=true)
+
+// === INPUT PARAMETERS ===
+len = input.int(20, minval=1, title="Donchian Channel Length")
+showBasis = input.bool(true, title="Show Basis Line")
+showSignals = input.bool(true, title="Show Turtle Signals")
+showAlerts = input.bool(true, title="Enable Alerts")
+
+// === DONCHIAN CHANNEL CALCULATIONS ===
+upper = ta.highest(high, len)
+lower = ta.lowest(low, len)
+basis = (upper + lower) / 2
+
+// === TURTLE BREAKOUT SIGNALS ===
+bullTurtle = upper > upper[1]
+bearTurtle = lower < lower[1]
+
+// Signal filtering - only new breakouts
+bullSignal = bullTurtle and not bullTurtle[1]
+bearSignal = bearTurtle and not bearTurtle[1]
+
+// === VISUAL DISPLAY ===
+upperPlot = plot(upper, title="Upper Channel", color=color.white, linewidth=2)
+lowerPlot = plot(lower, title="Lower Channel", color=color.white, linewidth=2)
+basisPlot = plot(showBasis ? basis : na, title="Basis", color=color.orange, linewidth=1)
+
+// Channel fill
+fill(upperPlot, lowerPlot, color=color.new(color.gray, 90), title="Channel Fill")
+
+// === SIGNAL VISUALIZATION ===
+plotshape(
+    showSignals and bullSignal, 
+    title="Bullish Turtle", 
+    style=shape.triangleup, 
+    location=location.belowbar, 
+    color=color.lime, 
+    size=size.small,
+    text="BULL"
+)
+
+plotshape(
+    showSignals and bearSignal, 
+    title="Bearish Turtle", 
+    style=shape.triangledown, 
+    location=location.abovebar, 
+    color=color.red, 
+    size=size.small,
+    text="BEAR"
+)
+
+// === BAR COLORING ===
+barcolor(bullTurtle ? color.yellow : bearTurtle ? color.white : na, title="Turtle Bar Color")
+
+// === ALERT CONDITIONS ===
+alertcondition(bullSignal, title="Bullish Turtle Alert", message="{{ticker}} Bullish Turtle Breakout")
+alertcondition(bearSignal, title="Bearish Turtle Alert", message="{{ticker}} Bearish Turtle Breakdown")
+
+// === INFORMATION TABLE ===
+if barstate.islast
+    var table infoTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 80), border_width=1)
+    table.cell(infoTable, 0, 0, "Turtle System", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "Status", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 1, "Channel Length", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, str.tostring(len), text_color=color.yellow, text_size=size.tiny)
+    table.cell(infoTable, 0, 2, "Upper Level", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 2, str.tostring(upper, "#.##"), text_color=color.lime, text_size=size.tiny)
+    table.cell(infoTable, 0, 3, "Lower Level", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 3, str.tostring(lower, "#.##"), text_color=color.red, text_size=size.tiny)

@@ -1,0 +1,170 @@
+//@version=5
+strategy(title="Turtle Trading Strategy", shorttitle="TurtleStrategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.1)
+
+// === INPUT PARAMETERS ===
+// Donchian Channel Settings
+channelLength = input.int(10, minval=1, title="Donchian Channel Length", group="Channel Settings")
+
+// SMMA Trend Filter Settings
+len1 = input.int(21, minval=1, title="SMMA 1 Length", group="Trend Filter")
+len2 = input.int(50, minval=1, title="SMMA 2 Length", group="Trend Filter")
+len3 = input.int(100, minval=1, title="SMMA 3 Length", group="Trend Filter")
+len4 = input.int(200, minval=1, title="SMMA 4 Length", group="Trend Filter")
+showSMMA = input.bool(true, title="Show SMMA Lines", group="Trend Filter")
+
+// Risk Management Settings
+riskPerTrade = input.float(50.0, minval=1.0, title="Risk Per Trade ($)", group="Risk Management")
+riskRewardRatio = input.float(3.0, minval=1.0, title="Risk:Reward Ratio", group="Risk Management")
+usePercentRisk = input.bool(false, title="Use Percent Risk", group="Risk Management")
+percentRisk = input.float(2.0, minval=0.1, maxval=10.0, title="Risk Percentage", group="Risk Management")
+
+// Pattern Recognition Settings
+use3LineStrike = input.bool(true, title="Use 3-Line Strike", group="Pattern Recognition")
+useEngulfing = input.bool(true, title="Use Engulfing Patterns", group="Pattern Recognition")
+
+// Display Settings
+showTradeInfo = input.bool(true, title="Show Trade Information", group="Display")
+showPerformance = input.bool(true, title="Show Performance", group="Display")
+
+// === SMOOTHED MOVING AVERAGES ===
+smma(src, length) =>
+    var float smma = na
+    smma := na(smma[1]) ? ta.sma(src, length) : (smma[1] * (length - 1) + src) / length
+    smma
+
+smma1 = smma(close, len1)
+smma2 = smma(close, len2)
+smma3 = smma(close, len3)
+smma4 = smma(close, len4)
+
+// Plot SMAs
+plot(showSMMA ? smma1 : na, color=color.yellow, linewidth=2, title="SMMA 21")
+plot(showSMMA ? smma2 : na, color=color.green, linewidth=2, title="SMMA 50")
+plot(showSMMA ? smma3 : na, color=color.blue, linewidth=1, title="SMMA 100")
+plot(showSMMA ? smma4 : na, color=color.red, linewidth=2, title="SMMA 200")
+
+// Trend Fill
+ema2 = ta.ema(close, 2)
+trendFill = ema2 > smma4 ? color.new(color.green, 85) : color.new(color.red, 85)
+fill(plot(ema2, display=display.none), plot(smma4, display=display.none), color=trendFill, title="Trend Fill")
+
+// === PATTERN RECOGNITION ===
+// 3-Line Strike Patterns
+bearStrike = use3LineStrike and close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
+bullStrike = use3LineStrike and close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
+
+plotshape(bearStrike, style=shape.triangledown, color=color.red, location=location.abovebar, size=size.tiny, text="3S")
+plotshape(bullStrike, style=shape.triangleup, color=color.green, location=location.belowbar, size=size.tiny, text="3S")
+
+// Engulfing Patterns
+bullEngulf = useEngulfing and open <= close[1] and open < open[1] and close > open[1]
+bearEngulf = useEngulfing and open >= close[1] and open > open[1] and close < open[1]
+
+plotshape(bullEngulf, style=shape.triangleup, color=color.lime, location=location.belowbar, size=size.tiny, text="ENG")
+plotshape(bearEngulf, style=shape.triangledown, color=color.red, location=location.abovebar, size=size.tiny, text="ENG")
+
+// === DONCHIAN CHANNELS ===
+upper = ta.highest(high, channelLength)
+lower = ta.lowest(low, channelLength)
+basis = (upper + lower) / 2
+
+plot(upper, title="Upper Channel", color=color.white, linewidth=1)
+plot(lower, title="Lower Channel", color=color.white, linewidth=1)
+
+// Breakout Signals
+bullBreakout = upper > upper[1]
+bearBreakout = lower < lower[1]
+
+bullSignal = bullBreakout and not bullBreakout[1]
+bearSignal = bearBreakout and not bearBreakout[1]
+
+// === TREND ALIGNMENT ===
+trendBullish = smma4 < smma2 and smma2 < smma1
+trendBearish = smma4 > smma2 and smma2 > smma1
+
+// === TRADE CONDITIONS ===
+longCondition = trendBullish and bullSignal
+shortCondition = trendBearish and bearSignal
+
+// === POSITION SIZING ===
+var float stopDistance = na
+var float positionSize = na
+var float riskAmount = na
+
+if longCondition or shortCondition
+    stopDistance := 2.0  // Fixed stop distance
+    riskAmount := usePercentRisk ? (strategy.equity * percentRisk / 100) : riskPerTrade
+    positionSize := riskAmount / stopDistance
+
+// === STRATEGY EXECUTION ===
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=positionSize)
+    strategy.exit("Long Exit", "Long", stop=close - stopDistance, limit=close + (stopDistance * riskRewardRatio))
+
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=positionSize)
+    strategy.exit("Short Exit", "Short", stop=close + stopDistance, limit=close - (stopDistance * riskRewardRatio))
+
+// === VISUAL SIGNALS ===
+plotshape(longCondition, title="Long Signal", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.normal, text="LONG")
+plotshape(shortCondition, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.normal, text="SHORT")
+
+// === TRADE LEVEL VISUALIZATION ===
+var float entryPrice = na
+var float stopPrice = na
+var float targetPrice = na
+
+if longCondition
+    entryPrice := close
+    stopPrice := close - stopDistance
+    targetPrice := close + (stopDistance * riskRewardRatio)
+
+if shortCondition
+    entryPrice := close
+    stopPrice := close + stopDistance
+    targetPrice := close - (stopDistance * riskRewardRatio)
+
+// Plot trade levels
+plot(strategy.position_size != 0 ? entryPrice : na, title="Entry", color=color.white, linewidth=2, style=plot.style_line)
+plot(strategy.position_size != 0 ? stopPrice : na, title="Stop", color=color.red, linewidth=2, style=plot.style_line)
+plot(strategy.position_size != 0 ? targetPrice : na, title="Target", color=color.green, linewidth=2, style=plot.style_line)
+
+// === INFORMATION TABLE ===
+if barstate.islast and showTradeInfo
+    var table infoTable = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 80), border_width=1)
+    table.cell(infoTable, 0, 0, "Turtle Strategy", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "Status", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 1, "Position", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", 
+               text_color=strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray, text_size=size.tiny)
+    table.cell(infoTable, 0, 2, "Risk/Trade", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 2, "$" + str.tostring(riskAmount, "#.##"), text_color=color.yellow, text_size=size.tiny)
+    table.cell(infoTable, 0, 3, "Upper", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 3, str.tostring(upper, "#.##"), text_color=color.lime, text_size=size.tiny)
+    table.cell(infoTable, 0, 4, "Lower", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 4, str.tostring(lower, "#.##"), text_color=color.red, text_size=size.tiny)
+    table.cell(infoTable, 0, 5, "Trend", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 5, trendBullish ? "BULL" : trendBearish ? "BEAR" : "NEUTRAL", 
+               text_color=trendBullish ? color.lime : trendBearish ? color.red : color.gray, text_size=size.tiny)
+
+// === PERFORMANCE METRICS ===
+if barstate.islast and showPerformance
+    var table perfTable = table.new(position.bottom_right, 2, 4, bgcolor=color.new(color.black, 80), border_width=1)
+    table.cell(perfTable, 0, 0, "Performance", text_color=color.white, text_size=size.small)
+    table.cell(perfTable, 1, 0, "Value", text_color=color.white, text_size=size.small)
+    table.cell(perfTable, 0, 1, "Net Profit", text_color=color.white, text_size=size.tiny)
+    table.cell(perfTable, 1, 1, "$" + str.tostring(strategy.netprofit, "#.##"), 
+               text_color=strategy.netprofit > 0 ? color.lime : color.red, text_size=size.tiny)
+    table.cell(perfTable, 0, 2, "Win Rate", text_color=color.white, text_size=size.tiny)
+    table.cell(perfTable, 1, 2, str.tostring(strategy.wintrades / (strategy.wintrades + strategy.losstrades) * 100, "#.#") + "%", 
+               text_color=color.yellow, text_size=size.tiny)
+    table.cell(perfTable, 0, 3, "Profit Factor", text_color=color.white, text_size=size.tiny)
+    table.cell(perfTable, 1, 3, str.tostring(strategy.grossprofit / strategy.grossloss, "#.##"), 
+               text_color=color.cyan, text_size=size.tiny)
+
+// === ALERT CONDITIONS ===
+alertcondition(longCondition, title="Long Entry", message="{{ticker}} LONG - Turtle Breakout")
+alertcondition(shortCondition, title="Short Entry", message="{{ticker}} SHORT - Turtle Breakdown")
+
+// Bar coloring based on trend
+barcolor(trendBullish and bullBreakout ? color.lime : trendBearish and bearBreakout ? color.red : na, title="Turtle Bar Color")

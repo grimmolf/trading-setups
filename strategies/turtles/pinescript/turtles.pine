@@ -1,0 +1,23 @@
+//@version=4
+study(title="GrimmTurtle", shorttitle="Turtle", overlay=true, resolution="")
+length = input(20, minval=1)
+lower = lowest(length)
+upper = highest(length)
+basis = avg(upper, lower)
+plot(basis, "Basis", color=#FF6D00)
+u = plot(upper, "Upper", color=color.white)
+l = plot(lower, "Lower", color=color.white)
+
+BullLabel = "Bullish Turtle"
+BearLabel = "Bearish Turtle"
+BullT= u[1] > u[2]
+BearT = u[1] < u[2]
+
+barcolor( BullT ? yellow : BearT ? white :na)
+
+plotshape(BullT, title="Bullish Turtle", style=shape.triangleup, location=location.belowbar, color=lime, text=BullLabel)
+plotshape(BearT, title="Bearish Turtle", style=shape.triangledown, location=location.abovebar, color=red, text=BearLabel)
+
+// alerts
+alertcondition(BullT, title='Bullish Turtle Alert', message='{{ticker}} Bullish Turtle')
+alertcondition(BearT, title='Bearish Turtle Alert', message='{{ticker}} Bearish Turtle')
